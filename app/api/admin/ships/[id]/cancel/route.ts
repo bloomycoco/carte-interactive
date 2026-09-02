@@ -31,7 +31,7 @@ export async function POST(_request: Request, ctx: RouteContext<"/api/admin/ship
     set x = ${pos.x}, y = ${pos.y}, dest_x = null, dest_y = null, dest_planet = null,
         departed_at = null, arrival_at = null, updated_at = now()
     where id = ${id}::uuid
-    returning id, fleet_id, name, code, x, y, dest_x, dest_y, dest_planet,
+    returning id, fleet_id, name, category, code, x, y, dest_x, dest_y, dest_planet,
               departed_at, arrival_at, created_at, updated_at
   `;
 

@@ -13,6 +13,8 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/ship
   if (!body) return NextResponse.json({ error: "corps invalide" }, { status: 400 });
 
   const name = typeof body.name === "string" ? body.name.trim() : undefined;
+  const hasCategory = "category" in body;
+  const category = typeof body.category === "string" && body.category.trim() ? body.category.trim() : null;
   const hasCoords = body.x !== undefined && body.y !== undefined;
   const x = Number(body.x);
   const y = Number(body.y);
@@ -23,6 +25,9 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/ship
 
   if (name !== undefined) {
     await db.sql`update ships set name = ${name}, updated_at = now() where id = ${id}::uuid`;
+  }
+  if (hasCategory) {
+    await db.sql`update ships set category = ${category}, updated_at = now() where id = ${id}::uuid`;
   }
   if (hasCoords) {
     if (!Number.isFinite(x) || !Number.isFinite(y)) {
@@ -46,7 +51,7 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/ship
   }
 
   const rows = await db.sql`
-    select id, fleet_id, name, code, x, y, dest_x, dest_y, dest_planet,
+    select id, fleet_id, name, category, code, x, y, dest_x, dest_y, dest_planet,
            departed_at, arrival_at, created_at, updated_at
     from ships
     where id = ${id}::uuid

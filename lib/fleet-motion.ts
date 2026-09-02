@@ -23,6 +23,7 @@ export type ShipTravelState = {
 export type PublicShip = ShipTravelState & {
   id: string;
   name: string;
+  category: string | null;
   faction: Faction;
   dest_planet: string | null;
 };

@@ -19,9 +19,8 @@ export default function FleetLayer({
         const pos = currentPosition(s, now);
         const meta = FACTION_META[s.faction];
         const isMine = unlockedShips.some((u) => u.id === s.id);
-        const status = s.dest_planet
-          ? `${s.name} — en route vers ${s.dest_planet}`
-          : `${s.name} — à quai`;
+        const label = s.category ? `${s.name} (${s.category})` : s.name;
+        const status = s.dest_planet ? `${label} — en route vers ${s.dest_planet}` : `${label} — à quai`;
         return (
           <div
             key={s.id}

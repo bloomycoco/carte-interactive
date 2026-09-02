@@ -10,7 +10,7 @@ export async function POST(request: Request) {
 
   const db = getDatabase();
   const rows = await db.sql`
-    select s.id, s.name, f.faction, f.name as fleet_name,
+    select s.id, s.name, s.category, f.faction, f.name as fleet_name,
            s.x, s.y, s.dest_x, s.dest_y, s.dest_planet, s.departed_at, s.arrival_at
     from ships s
     join fleets f on f.id = s.fleet_id

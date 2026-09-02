@@ -11,6 +11,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/admin/fleet
 
   const body = await request.json().catch(() => null);
   const name = typeof body?.name === "string" ? body.name.trim() : "";
+  const category = typeof body?.category === "string" && body.category.trim() ? body.category.trim() : null;
   const x = Number(body?.x);
   const y = Number(body?.y);
   const code =
@@ -29,9 +30,9 @@ export async function POST(request: Request, ctx: RouteContext<"/api/admin/fleet
 
   try {
     const rows = await db.sql`
-      insert into ships (fleet_id, name, code, x, y)
-      values (${id}::uuid, ${name}, ${code}, ${x}, ${y})
-      returning id, fleet_id, name, code, x, y, dest_x, dest_y, dest_planet,
+      insert into ships (fleet_id, name, category, code, x, y)
+      values (${id}::uuid, ${name}, ${category}, ${code}, ${x}, ${y})
+      returning id, fleet_id, name, category, code, x, y, dest_x, dest_y, dest_planet,
                 departed_at, arrival_at, created_at, updated_at
     `;
     return NextResponse.json({ ship: rows[0] });

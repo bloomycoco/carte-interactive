@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { PLANETS } from "@/lib/planets";
+import { SHIP_CLASSES } from "@/lib/ship-classes";
 import styles from "./AdminDashboard.module.css";
 
 type Role = "owner" | "admin";
@@ -12,6 +13,7 @@ type ShipRow = {
   id: string;
   fleet_id: string;
   name: string;
+  category: string | null;
   code: string;
   x: number;
   y: number;
@@ -64,7 +66,9 @@ export default function AdminDashboard({ role }: { role: Role }) {
   const [fleetFaction, setFleetFaction] = useState<Faction>("republique");
   const [creatingFleet, setCreatingFleet] = useState(false);
 
-  const [shipDrafts, setShipDrafts] = useState<Record<string, { name: string; planet: string }>>({});
+  const [shipDrafts, setShipDrafts] = useState<
+    Record<string, { name: string; planet: string; category: string }>
+  >({});
   const [creatingShipFor, setCreatingShipFor] = useState<string | null>(null);
 
   const [ownerCode, setOwnerCode] = useState("");
@@ -98,12 +102,22 @@ export default function AdminDashboard({ role }: { role: Role }) {
     setTimeout(() => setNotice(null), 4000);
   }
 
-  function draftFor(fleetId: string) {
-    return shipDrafts[fleetId] ?? { name: "", planet: PLANETS[0]?.name ?? "" };
+  function draftFor(fleetId: string, faction: Faction) {
+    return (
+      shipDrafts[fleetId] ?? {
+        name: "",
+        planet: PLANETS[0]?.name ?? "",
+        category: SHIP_CLASSES[faction][0] ?? "",
+      }
+    );
   }
 
-  function setDraft(fleetId: string, patch: Partial<{ name: string; planet: string }>) {
-    setShipDrafts((prev) => ({ ...prev, [fleetId]: { ...draftFor(fleetId), ...patch } }));
+  function setDraft(
+    fleetId: string,
+    faction: Faction,
+    patch: Partial<{ name: string; planet: string; category: string }>,
+  ) {
+    setShipDrafts((prev) => ({ ...prev, [fleetId]: { ...draftFor(fleetId, faction), ...patch } }));
   }
 
   async function handleCreateFleet(e: React.FormEvent) {
@@ -174,25 +188,30 @@ export default function AdminDashboard({ role }: { role: Role }) {
     }
   }
 
-  async function handleCreateShip(fleetId: string, e: React.FormEvent) {
+  async function handleCreateShip(fleetId: string, faction: Faction, e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setCreatingShipFor(fleetId);
     try {
-      const draft = draftFor(fleetId);
+      const draft = draftFor(fleetId, faction);
       const planet = PLANETS.find((p) => p.name === draft.planet);
       const data = await jsonOrThrow(
         await fetch(`/api/admin/fleets/${fleetId}/ships`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: draft.name.trim(), x: planet?.x ?? 0, y: planet?.y ?? 0 }),
+          body: JSON.stringify({
+            name: draft.name.trim(),
+            category: draft.category,
+            x: planet?.x ?? 0,
+            y: planet?.y ?? 0,
+          }),
         }),
       );
       setFleets(
         (prev) =>
           prev?.map((f) => (f.id === fleetId ? { ...f, ships: [...f.ships, data.ship] } : f)) ?? null,
       );
-      setDraft(fleetId, { name: "" });
+      setDraft(fleetId, faction, { name: "" });
       flash(`Vaisseau "${data.ship.name}" créé — code ${data.ship.code}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -220,6 +239,22 @@ export default function AdminDashboard({ role }: { role: Role }) {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name: name.trim() }),
+        }),
+      );
+      updateShipInState(fleetId, data.ship);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function setShipCategory(fleetId: string, id: string, category: string) {
+    setError(null);
+    try {
+      const data = await jsonOrThrow(
+        await fetch(`/api/admin/ships/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ category }),
         }),
       );
       updateShipInState(fleetId, data.ship);
@@ -403,6 +438,7 @@ export default function AdminDashboard({ role }: { role: Role }) {
                     <thead>
                       <tr>
                         <th>Vaisseau</th>
+                        <th>Catégorie</th>
                         <th>Code</th>
                         <th>Statut</th>
                         <th></th>
@@ -411,7 +447,7 @@ export default function AdminDashboard({ role }: { role: Role }) {
                     <tbody>
                       {f.ships.length === 0 && (
                         <tr>
-                          <td colSpan={4} className={styles.hint}>
+                          <td colSpan={5} className={styles.hint}>
                             Aucun vaisseau dans cette flotte.
                           </td>
                         </tr>
@@ -422,6 +458,23 @@ export default function AdminDashboard({ role }: { role: Role }) {
                         return (
                           <tr key={s.id}>
                             <td>{s.name}</td>
+                            <td>
+                              {isOwner ? (
+                                <select
+                                  value={s.category ?? ""}
+                                  onChange={(e) => setShipCategory(f.id, s.id, e.target.value)}
+                                >
+                                  <option value="">—</option>
+                                  {SHIP_CLASSES[f.faction].map((c) => (
+                                    <option key={c} value={c}>
+                                      {c}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                (s.category ?? "—")
+                              )}
+                            </td>
                             <td className={styles.code}>{s.code}</td>
                             <td className={styles.status}>
                               {traveling ? (
@@ -481,17 +534,27 @@ export default function AdminDashboard({ role }: { role: Role }) {
                 {isOwner && (
                   <form
                     className={styles.inlineForm}
-                    onSubmit={(e) => handleCreateShip(f.id, e)}
+                    onSubmit={(e) => handleCreateShip(f.id, f.faction, e)}
                   >
                     <input
                       required
                       placeholder="Nom du vaisseau"
-                      value={draftFor(f.id).name}
-                      onChange={(e) => setDraft(f.id, { name: e.target.value })}
+                      value={draftFor(f.id, f.faction).name}
+                      onChange={(e) => setDraft(f.id, f.faction, { name: e.target.value })}
                     />
                     <select
-                      value={draftFor(f.id).planet}
-                      onChange={(e) => setDraft(f.id, { planet: e.target.value })}
+                      value={draftFor(f.id, f.faction).category}
+                      onChange={(e) => setDraft(f.id, f.faction, { category: e.target.value })}
+                    >
+                      {SHIP_CLASSES[f.faction].map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={draftFor(f.id, f.faction).planet}
+                      onChange={(e) => setDraft(f.id, f.faction, { planet: e.target.value })}
                     >
                       {PLANETS.map((p) => (
                         <option key={p.name} value={p.name}>
