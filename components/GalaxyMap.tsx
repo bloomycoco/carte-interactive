@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./GalaxyMap.module.css";
+import AuthWidget from "./AuthWidget";
 import {
   FACTION_META,
   MANUAL_ROUTES,
@@ -396,6 +397,7 @@ export default function GalaxyMap() {
           <button className={styles.resetBtn} onClick={centerView}>
             Recentrer
           </button>
+          <AuthWidget />
         </div>
       </div>
 
