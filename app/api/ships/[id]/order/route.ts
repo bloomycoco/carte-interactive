@@ -49,9 +49,13 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
     return NextResponse.json({ error: "aucune route connue vers cette destination" }, { status: 400 });
   }
 
+  // évite un point de départ en double quand l'origine coïncide déjà
+  // avec la première planète du chemin (cas le plus courant)
+  const firstHop = routePath[0];
+  const startsAtFirstHop = firstHop.x === origin.x && firstHop.y === origin.y;
   const waypoints: Waypoint[] = [
     { x: origin.x, y: origin.y },
-    ...routePath.map((p) => ({ x: p.x, y: p.y })),
+    ...(startsAtFirstHop ? routePath.slice(1) : routePath).map((p) => ({ x: p.x, y: p.y })),
   ];
   const { departedAt, arrivalAt } = planTravelAlongPath(waypoints);
 
