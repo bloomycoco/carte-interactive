@@ -169,7 +169,8 @@ export default function GalaxyMap() {
     }
 
     function onPointerDown(e: PointerEvent) {
-      if ((e.target as HTMLElement).closest(`.${styles.searchWrap}`)) return;
+      const target = e.target as HTMLElement;
+      if (target.closest(`.${styles.searchWrap}`) || target.closest(`.${styles.planet}`)) return;
       isDragging = true;
       lastX = e.clientX;
       lastY = e.clientY;
@@ -272,9 +273,9 @@ export default function GalaxyMap() {
                 className={`${styles.zonePoly} ${hiddenFactions.has(f) ? styles.hidden : ""}`}
                 filter="url(#soften)"
               >
-                <path className="fill" fill={FACTION_META[f].color} d={ZONE_POLYGONS[f]} />
+                <path className={styles.fill} fill={FACTION_META[f].color} d={ZONE_POLYGONS[f]} />
                 <path
-                  className="line"
+                  className={styles.line}
                   stroke={FACTION_META[f].color}
                   d={ZONE_POLYGONS[f]}
                 />
