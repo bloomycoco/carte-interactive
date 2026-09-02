@@ -6,9 +6,11 @@
 export type Faction = "republique" | "csi" | "mandalore";
 
 // Unités-monde par seconde. La carte fait 5460x3460 : la traverser en
-// entier prend un peu plus de 2 minutes.
-export const SHIP_SPEED = 45;
-export const MIN_TRAVEL_SECONDS = 8;
+// entier prend environ 9 minutes ; un petit saut entre systèmes voisins
+// prend au moins une minute (MIN_TRAVEL_SECONDS) — les trajets sont
+// volontairement longs.
+export const SHIP_SPEED = 10;
+export const MIN_TRAVEL_SECONDS = 60;
 
 export type Waypoint = { x: number; y: number };
 
@@ -22,6 +24,10 @@ export type ShipTravelState = {
   // chemin suivi (départ réel -> ... -> destination), via le réseau de
   // routes. Null/absent = ancien trajet en ligne droite (rétrocompat).
   path?: Waypoint[] | null;
+  // rencontre aléatoire en cours de route : le vaisseau se fige à
+  // encounter_at tant qu'elle n'est pas résolue (combattre / fuir).
+  encounter_pending?: boolean;
+  encounter_at?: string | null;
 };
 
 // Un vaisseau tel que renseigné sur la carte publique — pas de code ici,
@@ -32,6 +38,7 @@ export type PublicShip = ShipTravelState & {
   category: string | null;
   faction: Faction;
   dest_planet: string | null;
+  damaged: boolean;
 };
 
 // Une flotte "déverrouillée" côté navigateur avec son code : donne accès
@@ -69,18 +76,35 @@ function pathLength(points: Waypoint[]) {
 // chaque segment.
 export function currentPosition(s: ShipTravelState, now = Date.now()) {
   if (s.dest_x == null || s.dest_y == null || !s.departed_at || !s.arrival_at) {
-    return { x: s.x, y: s.y, traveling: false as const };
+    return { x: s.x, y: s.y, traveling: false as const, stuck: false as const };
   }
   const start = new Date(s.departed_at).getTime();
   const end = new Date(s.arrival_at).getTime();
-  if (now >= end) return { x: s.dest_x, y: s.dest_y, traveling: false as const };
 
-  const t = Math.max(0, (now - start) / Math.max(1, end - start));
+  // une rencontre non résolue fige le vaisseau à sa position au moment
+  // où elle a eu lieu, tant que le joueur n'a pas choisi combattre/fuir
+  let effectiveNow = now;
+  let stuck = false;
+  if (s.encounter_pending && s.encounter_at) {
+    const encAt = new Date(s.encounter_at).getTime();
+    if (now >= encAt) {
+      effectiveNow = encAt;
+      stuck = true;
+    }
+  }
+
+  if (!stuck && effectiveNow >= end) {
+    return { x: s.dest_x, y: s.dest_y, traveling: false as const, stuck: false as const };
+  }
+
+  const t = Math.max(0, (effectiveNow - start) / Math.max(1, end - start));
   const points: Waypoint[] =
     s.path && s.path.length >= 2 ? s.path : [{ x: s.x, y: s.y }, { x: s.dest_x, y: s.dest_y }];
 
   const total = pathLength(points);
-  if (total === 0) return { x: points[points.length - 1].x, y: points[points.length - 1].y, traveling: true as const };
+  if (total === 0) {
+    return { x: points[points.length - 1].x, y: points[points.length - 1].y, traveling: true as const, stuck };
+  }
 
   let target = total * t;
   for (let i = 1; i < points.length; i++) {
@@ -91,12 +115,13 @@ export function currentPosition(s: ShipTravelState, now = Date.now()) {
         x: points[i - 1].x + (points[i].x - points[i - 1].x) * segT,
         y: points[i - 1].y + (points[i].y - points[i - 1].y) * segT,
         traveling: true as const,
+        stuck,
       };
     }
     target -= segLen;
   }
   const last = points[points.length - 1];
-  return { x: last.x, y: last.y, traveling: true as const };
+  return { x: last.x, y: last.y, traveling: true as const, stuck };
 }
 
 // Planifie un trajet le long d'un chemin (liste de points, départ réel

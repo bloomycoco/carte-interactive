@@ -279,6 +279,70 @@
   box-shadow: 0 4px 20px rgba(0,0,0,0.4);
 }
 
+.encounterOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 5, 8, 0.72);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+.encounterModal {
+  width: 380px;
+  max-width: 90vw;
+  background: rgba(13, 13, 26, 0.97);
+  border: 1px solid var(--separatist);
+  border-radius: 14px;
+  padding: 26px 28px;
+  box-shadow: 0 0 40px rgba(217, 82, 74, 0.25), 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+.encounterTitle {
+  font-family: var(--font-cinzel), serif;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--separatist);
+  margin-bottom: 12px;
+  letter-spacing: 0.02em;
+}
+.encounterText {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--star);
+  margin: 0 0 20px;
+}
+.encounterActions { display: flex; gap: 12px; }
+.encounterActions button {
+  flex: 1;
+  padding: 11px 14px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 700;
+  font-family: var(--font-manrope), sans-serif;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+.encounterActions button:disabled { opacity: 0.5; cursor: default; }
+.encounterFight {
+  background: rgba(185, 139, 224, 0.2);
+  border: 1px solid var(--signal);
+  color: var(--star);
+}
+.encounterFight:hover:not(:disabled) { filter: brightness(1.2); }
+.encounterFlee {
+  background: rgba(217, 82, 74, 0.15);
+  border: 1px solid var(--separatist);
+  color: var(--star);
+}
+.encounterFlee:hover:not(:disabled) { filter: brightness(1.2); }
+.encounterHint {
+  margin: 16px 0 0;
+  font-size: 11px;
+  color: var(--star-dim);
+  line-height: 1.5;
+}
+
 .sendWrap { position: relative; }
 .sendChooser {
   position: absolute;

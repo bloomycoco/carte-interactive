@@ -33,11 +33,14 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/ship
     if (!Number.isFinite(x) || !Number.isFinite(y)) {
       return NextResponse.json({ error: "coordonnées invalides" }, { status: 400 });
     }
-    // Téléporter annule aussi tout trajet en cours.
+    // Téléporter annule tout trajet en cours et répare le vaisseau
+    // (échappatoire Owner à un vaisseau endommagé ou bloqué).
     await db.sql`
       update ships
       set x = ${x}, y = ${y}, dest_x = null, dest_y = null, dest_planet = null,
-          path = null, departed_at = null, arrival_at = null, updated_at = now()
+          path = null, departed_at = null, arrival_at = null, damaged = false,
+          encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
+          updated_at = now()
       where id = ${id}::uuid
     `;
   }
@@ -52,7 +55,7 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/ship
 
   const rows = await db.sql`
     select id, fleet_id, name, category, code, x, y, dest_x, dest_y, dest_planet,
-           departed_at, arrival_at, created_at, updated_at
+           departed_at, arrival_at, damaged, encounter_pending, created_at, updated_at
     from ships
     where id = ${id}::uuid
   `;

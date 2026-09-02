@@ -225,6 +225,48 @@ export default function GalaxyMap() {
     }
   }
 
+  const [resolvingEncounter, setResolvingEncounter] = useState(false);
+
+  // une flotte ennemie a été croisée par un vaisseau qu'on contrôle et
+  // attend une décision (combattre / fuir)
+  const encounterShip = ships.find(
+    (s) =>
+      unlockedShips.some((u) => u.id === s.id) &&
+      s.encounter_pending &&
+      s.encounter_at &&
+      new Date(s.encounter_at).getTime() <= now,
+  );
+
+  async function resolveEncounter(shipId: string, choice: "fight" | "flee") {
+    const unlocked = unlockedShips.find((u) => u.id === shipId);
+    if (!unlocked) return;
+    setResolvingEncounter(true);
+    try {
+      const res = await fetch(`/api/ships/${shipId}/resolve-encounter`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: unlocked.code, choice }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFleetNotice(data.error ?? "échec de la résolution");
+        return;
+      }
+      setShips((prev) => prev.map((s) => (s.id === shipId ? { ...s, ...data.ship } : s)));
+      const msg =
+        data.outcome === "won"
+          ? `${unlocked.name} a repoussé l'ennemi et poursuit sa route !`
+          : data.outcome === "fled"
+            ? `${unlocked.name} a fui le combat — vaisseau endommagé, repli forcé vers Coruscant.`
+            : `${unlocked.name} a perdu le combat — vaisseau endommagé, repli forcé vers Coruscant.`;
+      setFleetNotice(msg);
+    } catch {
+      setFleetNotice("erreur réseau");
+    } finally {
+      setResolvingEncounter(false);
+    }
+  }
+
   useEffect(() => {
     if (!fleetNotice) return;
     const id = setTimeout(() => setFleetNotice(null), 4000);
@@ -638,6 +680,39 @@ export default function GalaxyMap() {
       </div>
 
       {fleetNotice && <div className={styles.fleetToast}>{fleetNotice}</div>}
+
+      {encounterShip && (
+        <div className={styles.encounterOverlay}>
+          <div className={styles.encounterModal}>
+            <div className={styles.encounterTitle}>Flotte ennemie en approche</div>
+            <p className={styles.encounterText}>
+              <strong>{encounterShip.name}</strong> croise une flotte ennemie
+              {encounterShip.dest_planet ? ` sur la route vers ${encounterShip.dest_planet}` : ""}.
+              Que fait l&apos;équipage ?
+            </p>
+            <div className={styles.encounterActions}>
+              <button
+                className={styles.encounterFight}
+                disabled={resolvingEncounter}
+                onClick={() => resolveEncounter(encounterShip.id, "fight")}
+              >
+                Combattre
+              </button>
+              <button
+                className={styles.encounterFlee}
+                disabled={resolvingEncounter}
+                onClick={() => resolveEncounter(encounterShip.id, "flee")}
+              >
+                Fuir
+              </button>
+            </div>
+            <p className={styles.encounterHint}>
+              Fuir endommage le vaisseau et le force à rejoindre Coruscant. Combattre risque la même
+              chose, mais en cas de victoire le vaisseau poursuit sa route indemne.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className={styles.hint}>molette pour zoomer · glisser pour naviguer · clic sur un système</div>
       <div className={styles.legend}>

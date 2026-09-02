@@ -137,6 +137,8 @@
 
 .status { color: var(--star-dim); font-size: 12.5px; }
 .eta { color: var(--star); }
+.encounterTag { color: var(--separatist); font-weight: 600; }
+.damagedTag { color: var(--cartel); }
 
 .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 

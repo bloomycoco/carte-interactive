@@ -17,7 +17,8 @@ export async function POST(request: Request) {
   if (!fleet) return NextResponse.json({ error: "code inconnu" }, { status: 404 });
 
   const ships = await db.sql`
-    select id, name, category, x, y, dest_x, dest_y, dest_planet, departed_at, arrival_at, path
+    select id, name, category, x, y, dest_x, dest_y, dest_planet, departed_at, arrival_at, path,
+           damaged, encounter_pending, encounter_at
     from ships
     where fleet_id = ${fleet.id}::uuid
     order by created_at asc

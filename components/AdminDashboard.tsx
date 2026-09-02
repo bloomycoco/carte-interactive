@@ -22,6 +22,8 @@ type ShipRow = {
   dest_planet: string | null;
   departed_at: string | null;
   arrival_at: string | null;
+  damaged: boolean;
+  encounter_pending: boolean;
 };
 
 type FleetRow = {
@@ -477,7 +479,9 @@ export default function AdminDashboard({ role }: { role: Role }) {
                             </td>
                             <td className={styles.code}>{s.code}</td>
                             <td className={styles.status}>
-                              {traveling ? (
+                              {s.encounter_pending ? (
+                                <span className={styles.encounterTag}>⚠ rencontre en cours</span>
+                              ) : traveling ? (
                                 <>
                                   en transit → {s.dest_planet}
                                   {eta && <span className={styles.eta}> ({eta})</span>}
@@ -485,6 +489,7 @@ export default function AdminDashboard({ role }: { role: Role }) {
                               ) : (
                                 "à quai"
                               )}
+                              {s.damaged && <span className={styles.damagedTag}> · endommagé</span>}
                             </td>
                             <td className={styles.actions}>
                               {traveling && (

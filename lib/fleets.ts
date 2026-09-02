@@ -2,6 +2,7 @@
 // dépendance Node) et ajoute la génération de code, qui a besoin de
 // crypto — ce fichier est donc réservé au serveur.
 import crypto from "node:crypto";
+import { currentPosition, type Waypoint } from "./fleet-motion";
 
 export * from "./fleet-motion";
 
@@ -14,4 +15,56 @@ export function generateCode(length = 6) {
     out += CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)];
   }
   return out;
+}
+
+function randomFraction() {
+  // [0, 1) avec une bonne source d'aléa
+  return crypto.randomInt(1_000_000) / 1_000_000;
+}
+
+// En dessous de cette durée de trajet, jamais de rencontre (les petits
+// sauts entre voisins restent tranquilles).
+const ENCOUNTER_MIN_TRAVEL_SECONDS = 90;
+// Probabilité qu'un trajet assez long déclenche une rencontre.
+const ENCOUNTER_CHANCE = 0.3;
+// Chances de gagner un combat choisi.
+const COMBAT_WIN_CHANCE = 0.55;
+
+// Tire au sort si une flotte ennemie sera croisée sur ce trajet et, si
+// oui, à quel moment (quelque part entre 20% et 80% du chemin — jamais
+// pile au départ ou à l'arrivée).
+export function maybeScheduleEncounter(departedAt: Date, arrivalAt: Date): { encounterAt: Date } | null {
+  const durationSeconds = (arrivalAt.getTime() - departedAt.getTime()) / 1000;
+  if (durationSeconds < ENCOUNTER_MIN_TRAVEL_SECONDS) return null;
+  if (randomFraction() >= ENCOUNTER_CHANCE) return null;
+
+  const frac = 0.2 + randomFraction() * 0.6;
+  const encounterAt = new Date(departedAt.getTime() + (arrivalAt.getTime() - departedAt.getTime()) * frac);
+  return { encounterAt };
+}
+
+export function rollCombatWin() {
+  return randomFraction() < COMBAT_WIN_CHANCE;
+}
+
+// Position d'un vaisseau au moment précis d'une rencontre programmée
+// (réutilise l'interpolation le long du chemin).
+export function positionAt(
+  path: Waypoint[],
+  departedAt: Date,
+  arrivalAt: Date,
+  at: Date,
+) {
+  return currentPosition(
+    {
+      x: path[0].x,
+      y: path[0].y,
+      dest_x: path[path.length - 1].x,
+      dest_y: path[path.length - 1].y,
+      departed_at: departedAt.toISOString(),
+      arrival_at: arrivalAt.toISOString(),
+      path,
+    },
+    at.getTime(),
+  );
 }

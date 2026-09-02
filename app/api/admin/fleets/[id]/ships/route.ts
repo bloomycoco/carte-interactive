@@ -33,7 +33,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/admin/fleet
       insert into ships (fleet_id, name, category, code, x, y)
       values (${id}::uuid, ${name}, ${category}, ${code}, ${x}, ${y})
       returning id, fleet_id, name, category, code, x, y, dest_x, dest_y, dest_planet,
-                departed_at, arrival_at, created_at, updated_at
+                departed_at, arrival_at, damaged, encounter_pending, created_at, updated_at
     `;
     return NextResponse.json({ ship: rows[0] });
   } catch {

@@ -20,11 +20,19 @@ export default function FleetLayer({
         const meta = FACTION_META[s.faction];
         const isMine = unlockedShips.some((u) => u.id === s.id);
         const label = s.category ? `${s.name} (${s.category})` : s.name;
-        const status = s.dest_planet ? `${label} — en route vers ${s.dest_planet}` : `${label} — à quai`;
+        let status = s.dest_planet ? `${label} — en route vers ${s.dest_planet}` : `${label} — à quai`;
+        if (pos.stuck) status = `${label} — flotte ennemie en vue !`;
+        else if (s.damaged) status += " (endommagé)";
         return (
           <div
             key={s.id}
-            className={`${styles.fleet} ${pos.traveling ? styles.traveling : ""} ${isMine ? styles.mine : ""}`}
+            className={[
+              styles.fleet,
+              pos.traveling ? styles.traveling : "",
+              isMine ? styles.mine : "",
+              pos.stuck ? styles.stuck : "",
+              s.damaged ? styles.damaged : "",
+            ].join(" ")}
             style={{
               left: pos.x,
               top: pos.y,
