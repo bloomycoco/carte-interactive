@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { User } from "netlify-identity-widget";
+import { useEffect, useRef, useState } from "react";
+import type * as NetlifyIdentity from "netlify-identity-widget";
 import styles from "./AuthWidget.module.css";
 
 type Profile = {
@@ -19,6 +19,7 @@ const ROLE_LABEL: Record<Profile["role"], string> = {
 };
 
 export default function AuthWidget() {
+  const identityRef = useRef<typeof NetlifyIdentity | null>(null);
   const [ready, setReady] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(false);
@@ -38,44 +39,44 @@ export default function AuthWidget() {
   }
 
   useEffect(() => {
-    let identity: typeof import("netlify-identity-widget");
+    let cancelled = false;
+
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const identity = require("netlify-identity-widget") as typeof NetlifyIdentity;
+    identityRef.current = identity;
+
     const onLogin = () => {
       identity.close();
       refreshProfile();
     };
     const onLogout = () => setProfile(null);
-    const onInit = (user: User | null) => {
+    const onInit = (user: NetlifyIdentity.User | null) => {
+      if (cancelled) return;
+      setReady(true);
       if (user) refreshProfile();
     };
 
-    import("netlify-identity-widget").then((mod) => {
-      identity = mod;
-      identity.init();
-      setReady(true);
-
-      identity.on("login", onLogin);
-      identity.on("logout", onLogout);
-      identity.on("init", onInit);
-    });
+    identity.on("init", onInit);
+    identity.on("login", onLogin);
+    identity.on("logout", onLogout);
+    identity.init();
 
     return () => {
-      if (!identity) return;
+      cancelled = true;
+      identity.off("init", onInit);
       identity.off("login", onLogin);
       identity.off("logout", onLogout);
-      identity.off("init", onInit);
     };
   }, []);
 
-  async function openLogin() {
+  function openLogin() {
     setLoading(true);
-    const identity = await import("netlify-identity-widget");
-    identity.open("login");
+    identityRef.current?.open("login");
     setLoading(false);
   }
 
-  async function logout() {
-    const identity = await import("netlify-identity-widget");
-    identity.logout();
+  function logout() {
+    identityRef.current?.logout();
   }
 
   if (!ready) return null;
