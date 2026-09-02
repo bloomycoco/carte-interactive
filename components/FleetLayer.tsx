@@ -1,30 +1,30 @@
 "use client";
 
 import { FACTION_META } from "@/lib/planets";
-import { currentPosition, type PublicFleet, type UnlockedFleet } from "@/lib/fleet-motion";
+import { currentPosition, type PublicShip, type UnlockedShip } from "@/lib/fleet-motion";
 import styles from "./FleetLayer.module.css";
 
 export default function FleetLayer({
-  fleets,
-  unlockedFleets,
+  ships,
+  unlockedShips,
   now,
 }: {
-  fleets: PublicFleet[];
-  unlockedFleets: UnlockedFleet[];
+  ships: PublicShip[];
+  unlockedShips: UnlockedShip[];
   now: number;
 }) {
   return (
     <>
-      {fleets.map((f) => {
-        const pos = currentPosition(f, now);
-        const meta = FACTION_META[f.faction];
-        const isMine = unlockedFleets.some((u) => u.id === f.id);
-        const status = f.dest_planet
-          ? `${f.name} — en route vers ${f.dest_planet}`
-          : `${f.name} — à quai`;
+      {ships.map((s) => {
+        const pos = currentPosition(s, now);
+        const meta = FACTION_META[s.faction];
+        const isMine = unlockedShips.some((u) => u.id === s.id);
+        const status = s.dest_planet
+          ? `${s.name} — en route vers ${s.dest_planet}`
+          : `${s.name} — à quai`;
         return (
           <div
-            key={f.id}
+            key={s.id}
             className={`${styles.fleet} ${pos.traveling ? styles.traveling : ""} ${isMine ? styles.mine : ""}`}
             style={{
               left: pos.x,

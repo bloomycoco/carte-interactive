@@ -8,7 +8,7 @@ export * from "./fleet-motion";
 // Alphabet sans caractères ambigus (0/O, 1/I/L).
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
-export function generateFleetCode(length = 6) {
+export function generateCode(length = 6) {
   let out = "";
   for (let i = 0; i < length; i++) {
     out += CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)];

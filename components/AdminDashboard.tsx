@@ -8,10 +8,10 @@ import styles from "./AdminDashboard.module.css";
 type Role = "owner" | "admin";
 type Faction = "republique" | "csi" | "mandalore";
 
-type FleetRow = {
+type ShipRow = {
   id: string;
+  fleet_id: string;
   name: string;
-  faction: Faction;
   code: string;
   x: number;
   y: number;
@@ -20,8 +20,14 @@ type FleetRow = {
   dest_planet: string | null;
   departed_at: string | null;
   arrival_at: string | null;
-  created_at: string;
-  updated_at: string;
+};
+
+type FleetRow = {
+  id: string;
+  name: string;
+  faction: Faction;
+  code: string;
+  ships: ShipRow[];
 };
 
 const FACTION_LABEL: Record<Faction, string> = {
@@ -56,9 +62,10 @@ export default function AdminDashboard({ role }: { role: Role }) {
 
   const [fleetName, setFleetName] = useState("");
   const [fleetFaction, setFleetFaction] = useState<Faction>("republique");
-  const [fleetPlanet, setFleetPlanet] = useState(PLANETS[0]?.name ?? "");
-  const [fleetCode, setFleetCode] = useState("");
   const [creatingFleet, setCreatingFleet] = useState(false);
+
+  const [shipDrafts, setShipDrafts] = useState<Record<string, { name: string; planet: string }>>({});
+  const [creatingShipFor, setCreatingShipFor] = useState<string | null>(null);
 
   const [ownerCode, setOwnerCode] = useState("");
   const [adminCode, setAdminCode] = useState("");
@@ -91,50 +98,33 @@ export default function AdminDashboard({ role }: { role: Role }) {
     setTimeout(() => setNotice(null), 4000);
   }
 
+  function draftFor(fleetId: string) {
+    return shipDrafts[fleetId] ?? { name: "", planet: PLANETS[0]?.name ?? "" };
+  }
+
+  function setDraft(fleetId: string, patch: Partial<{ name: string; planet: string }>) {
+    setShipDrafts((prev) => ({ ...prev, [fleetId]: { ...draftFor(fleetId), ...patch } }));
+  }
+
   async function handleCreateFleet(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setCreatingFleet(true);
     try {
-      const planet = PLANETS.find((p) => p.name === fleetPlanet);
       const data = await jsonOrThrow(
         await fetch("/api/admin/fleets", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: fleetName.trim(),
-            faction: fleetFaction,
-            x: planet?.x ?? 0,
-            y: planet?.y ?? 0,
-            code: fleetCode.trim() || undefined,
-          }),
+          body: JSON.stringify({ name: fleetName.trim(), faction: fleetFaction }),
         }),
       );
       setFleets((prev) => (prev ? [...prev, data.fleet] : [data.fleet]));
       setFleetName("");
-      setFleetCode("");
       flash(`Flotte "${data.fleet.name}" créée — code ${data.fleet.code}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setCreatingFleet(false);
-    }
-  }
-
-  async function regenerateCode(id: string) {
-    setError(null);
-    try {
-      const data = await jsonOrThrow(
-        await fetch(`/api/admin/fleets/${id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ regenerateCode: true }),
-        }),
-      );
-      setFleets((prev) => prev?.map((f) => (f.id === id ? data.fleet : f)) ?? null);
-      flash(`Nouveau code : ${data.fleet.code}`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -150,16 +140,113 @@ export default function AdminDashboard({ role }: { role: Role }) {
           body: JSON.stringify({ name: name.trim() }),
         }),
       );
-      setFleets((prev) => prev?.map((f) => (f.id === id ? data.fleet : f)) ?? null);
+      setFleets((prev) => prev?.map((f) => (f.id === id ? { ...f, ...data.fleet } : f)) ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }
 
-  async function teleportFleet(id: string) {
-    const planetName = prompt(
-      "Téléporter la flotte sur quelle planète ? (nom exact, annule le trajet en cours)",
+  async function regenerateFleetCode(id: string) {
+    setError(null);
+    try {
+      const data = await jsonOrThrow(
+        await fetch(`/api/admin/fleets/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ regenerateCode: true }),
+        }),
+      );
+      setFleets((prev) => prev?.map((f) => (f.id === id ? { ...f, ...data.fleet } : f)) ?? null);
+      flash(`Nouveau code de flotte : ${data.fleet.code}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function deleteFleet(id: string) {
+    if (!confirm("Supprimer cette flotte et TOUS ses vaisseaux ?")) return;
+    setError(null);
+    try {
+      await jsonOrThrow(await fetch(`/api/admin/fleets/${id}`, { method: "DELETE" }));
+      setFleets((prev) => prev?.filter((f) => f.id !== id) ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function handleCreateShip(fleetId: string, e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setCreatingShipFor(fleetId);
+    try {
+      const draft = draftFor(fleetId);
+      const planet = PLANETS.find((p) => p.name === draft.planet);
+      const data = await jsonOrThrow(
+        await fetch(`/api/admin/fleets/${fleetId}/ships`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: draft.name.trim(), x: planet?.x ?? 0, y: planet?.y ?? 0 }),
+        }),
+      );
+      setFleets(
+        (prev) =>
+          prev?.map((f) => (f.id === fleetId ? { ...f, ships: [...f.ships, data.ship] } : f)) ?? null,
+      );
+      setDraft(fleetId, { name: "" });
+      flash(`Vaisseau "${data.ship.name}" créé — code ${data.ship.code}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCreatingShipFor(null);
+    }
+  }
+
+  function updateShipInState(fleetId: string, ship: ShipRow) {
+    setFleets(
+      (prev) =>
+        prev?.map((f) =>
+          f.id === fleetId ? { ...f, ships: f.ships.map((s) => (s.id === ship.id ? ship : s)) } : f,
+        ) ?? null,
     );
+  }
+
+  async function renameShip(fleetId: string, id: string, current: string) {
+    const name = prompt("Nouveau nom du vaisseau :", current);
+    if (!name || !name.trim() || name === current) return;
+    setError(null);
+    try {
+      const data = await jsonOrThrow(
+        await fetch(`/api/admin/ships/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: name.trim() }),
+        }),
+      );
+      updateShipInState(fleetId, data.ship);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function regenerateShipCode(fleetId: string, id: string) {
+    setError(null);
+    try {
+      const data = await jsonOrThrow(
+        await fetch(`/api/admin/ships/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ regenerateCode: true }),
+        }),
+      );
+      updateShipInState(fleetId, data.ship);
+      flash(`Nouveau code de vaisseau : ${data.ship.code}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function teleportShip(fleetId: string, id: string) {
+    const planetName = prompt("Téléporter le vaisseau sur quelle planète ? (nom exact)");
     if (!planetName) return;
     const planet = PLANETS.find((p) => p.name.toLowerCase() === planetName.trim().toLowerCase());
     if (!planet) {
@@ -169,35 +256,39 @@ export default function AdminDashboard({ role }: { role: Role }) {
     setError(null);
     try {
       const data = await jsonOrThrow(
-        await fetch(`/api/admin/fleets/${id}`, {
+        await fetch(`/api/admin/ships/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ x: planet.x, y: planet.y }),
         }),
       );
-      setFleets((prev) => prev?.map((f) => (f.id === id ? data.fleet : f)) ?? null);
+      updateShipInState(fleetId, data.ship);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }
 
-  async function cancelOrder(id: string) {
+  async function cancelShipOrder(fleetId: string, id: string) {
     setError(null);
     try {
-      const data = await jsonOrThrow(await fetch(`/api/admin/fleets/${id}/cancel`, { method: "POST" }));
-      setFleets((prev) => prev?.map((f) => (f.id === id ? data.fleet : f)) ?? null);
+      const data = await jsonOrThrow(await fetch(`/api/admin/ships/${id}/cancel`, { method: "POST" }));
+      updateShipInState(fleetId, data.ship);
       flash("Trajet annulé");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }
 
-  async function deleteFleet(id: string) {
-    if (!confirm("Supprimer définitivement cette flotte ?")) return;
+  async function deleteShip(fleetId: string, id: string) {
+    if (!confirm("Supprimer définitivement ce vaisseau ?")) return;
     setError(null);
     try {
-      await jsonOrThrow(await fetch(`/api/admin/fleets/${id}`, { method: "DELETE" }));
-      setFleets((prev) => prev?.filter((f) => f.id !== id) ?? null);
+      await jsonOrThrow(await fetch(`/api/admin/ships/${id}`, { method: "DELETE" }));
+      setFleets(
+        (prev) =>
+          prev?.map((f) => (f.id === fleetId ? { ...f, ships: f.ships.filter((s) => s.id !== id) } : f)) ??
+          null,
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -245,6 +336,15 @@ export default function AdminDashboard({ role }: { role: Role }) {
       {error && <div className={styles.error}>{error}</div>}
       {notice && <div className={styles.notice}>{notice}</div>}
 
+      <section className={styles.section}>
+        <h2>Comment ça marche</h2>
+        <p className={styles.hint}>
+          Le code de <strong>flotte</strong> donne un accès en lecture : ses vaisseaux et leur statut,
+          mais pas le contrôle. Le code de <strong>vaisseau</strong> donne le contrôle direct de ce
+          vaisseau (peut recevoir des ordres). Un joueur peut avoir l&apos;un, l&apos;autre, ou les deux.
+        </p>
+      </section>
+
       {isOwner && (
         <section className={styles.section}>
           <h2>Créer une flotte</h2>
@@ -260,19 +360,6 @@ export default function AdminDashboard({ role }: { role: Role }) {
               <option value="csi">CSI</option>
               <option value="mandalore">Mandalore</option>
             </select>
-            <select value={fleetPlanet} onChange={(e) => setFleetPlanet(e.target.value)}>
-              {PLANETS.map((p) => (
-                <option key={p.name} value={p.name}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-            <input
-              placeholder="Code (auto si vide)"
-              value={fleetCode}
-              onChange={(e) => setFleetCode(e.target.value.toUpperCase())}
-              className={styles.codeInput}
-            />
             <button type="submit" disabled={creatingFleet}>
               {creatingFleet ? "Création…" : "Créer"}
             </button>
@@ -281,78 +368,144 @@ export default function AdminDashboard({ role }: { role: Role }) {
       )}
 
       <section className={styles.section}>
-        <h2>Flottes</h2>
-        <p className={styles.hint}>
-          Le code donne le contrôle d&apos;une flotte à qui le connaît — communique-le aux joueurs
-          concernés.
-        </p>
+        <h2>Flottes &amp; vaisseaux</h2>
         {!fleets ? (
           <p className={styles.hint}>Chargement…</p>
         ) : fleets.length === 0 ? (
           <p className={styles.hint}>Aucune flotte pour le moment.</p>
         ) : (
-          <div className={styles.tableWrap}>
-            <table>
-              <thead>
-                <tr>
-                  <th>Nom</th>
-                  <th>Clan</th>
-                  <th>Code</th>
-                  <th>Statut</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {fleets.map((f) => {
-                  const traveling = !!f.dest_planet;
-                  const eta = traveling ? etaLabel(f.arrival_at) : null;
-                  return (
-                    <tr key={f.id}>
-                      <td>{f.name}</td>
-                      <td>
-                        <span data-faction={f.faction} className={styles.factionTag}>
-                          {FACTION_LABEL[f.faction]}
-                        </span>
-                      </td>
-                      <td className={styles.code}>{f.code}</td>
-                      <td className={styles.status}>
-                        {traveling ? (
-                          <>
-                            en transit → {f.dest_planet}
-                            {eta && <span className={styles.eta}> ({eta})</span>}
-                          </>
-                        ) : (
-                          "à quai"
-                        )}
-                      </td>
-                      <td className={styles.actions}>
-                        {traveling && (
-                          <button className={styles.smallBtn} onClick={() => cancelOrder(f.id)}>
-                            Annuler
-                          </button>
-                        )}
-                        {isOwner && (
-                          <>
-                            <button className={styles.smallBtnGhost} onClick={() => renameFleet(f.id, f.name)}>
-                              Renommer
-                            </button>
-                            <button className={styles.smallBtnGhost} onClick={() => teleportFleet(f.id)}>
-                              Téléporter
-                            </button>
-                            <button className={styles.smallBtnGhost} onClick={() => regenerateCode(f.id)}>
-                              Nouveau code
-                            </button>
-                            <button className={styles.smallBtnGhost} onClick={() => deleteFleet(f.id)}>
-                              Supprimer
-                            </button>
-                          </>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className={styles.fleetList}>
+            {fleets.map((f) => (
+              <div key={f.id} className={styles.fleetBlock}>
+                <div className={styles.fleetHead}>
+                  <span data-faction={f.faction} className={styles.factionTag}>
+                    {FACTION_LABEL[f.faction]}
+                  </span>
+                  <span className={styles.fleetTitle}>{f.name}</span>
+                  <span className={styles.code}>{f.code}</span>
+                  {isOwner && (
+                    <div className={styles.actions}>
+                      <button className={styles.smallBtnGhost} onClick={() => renameFleet(f.id, f.name)}>
+                        Renommer
+                      </button>
+                      <button className={styles.smallBtnGhost} onClick={() => regenerateFleetCode(f.id)}>
+                        Nouveau code
+                      </button>
+                      <button className={styles.smallBtnGhost} onClick={() => deleteFleet(f.id)}>
+                        Supprimer
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className={styles.tableWrap}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Vaisseau</th>
+                        <th>Code</th>
+                        <th>Statut</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {f.ships.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className={styles.hint}>
+                            Aucun vaisseau dans cette flotte.
+                          </td>
+                        </tr>
+                      )}
+                      {f.ships.map((s) => {
+                        const traveling = !!s.dest_planet;
+                        const eta = traveling ? etaLabel(s.arrival_at) : null;
+                        return (
+                          <tr key={s.id}>
+                            <td>{s.name}</td>
+                            <td className={styles.code}>{s.code}</td>
+                            <td className={styles.status}>
+                              {traveling ? (
+                                <>
+                                  en transit → {s.dest_planet}
+                                  {eta && <span className={styles.eta}> ({eta})</span>}
+                                </>
+                              ) : (
+                                "à quai"
+                              )}
+                            </td>
+                            <td className={styles.actions}>
+                              {traveling && (
+                                <button
+                                  className={styles.smallBtn}
+                                  onClick={() => cancelShipOrder(f.id, s.id)}
+                                >
+                                  Annuler
+                                </button>
+                              )}
+                              {isOwner && (
+                                <>
+                                  <button
+                                    className={styles.smallBtnGhost}
+                                    onClick={() => renameShip(f.id, s.id, s.name)}
+                                  >
+                                    Renommer
+                                  </button>
+                                  <button
+                                    className={styles.smallBtnGhost}
+                                    onClick={() => teleportShip(f.id, s.id)}
+                                  >
+                                    Téléporter
+                                  </button>
+                                  <button
+                                    className={styles.smallBtnGhost}
+                                    onClick={() => regenerateShipCode(f.id, s.id)}
+                                  >
+                                    Nouveau code
+                                  </button>
+                                  <button
+                                    className={styles.smallBtnGhost}
+                                    onClick={() => deleteShip(f.id, s.id)}
+                                  >
+                                    Supprimer
+                                  </button>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {isOwner && (
+                  <form
+                    className={styles.inlineForm}
+                    onSubmit={(e) => handleCreateShip(f.id, e)}
+                  >
+                    <input
+                      required
+                      placeholder="Nom du vaisseau"
+                      value={draftFor(f.id).name}
+                      onChange={(e) => setDraft(f.id, { name: e.target.value })}
+                    />
+                    <select
+                      value={draftFor(f.id).planet}
+                      onChange={(e) => setDraft(f.id, { planet: e.target.value })}
+                    >
+                      {PLANETS.map((p) => (
+                        <option key={p.name} value={p.name}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button type="submit" disabled={creatingShipFor === f.id}>
+                      {creatingShipFor === f.id ? "Création…" : "+ Vaisseau"}
+                    </button>
+                  </form>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </section>

@@ -164,6 +164,19 @@
 .factionTag[data-faction="csi"] { background: rgba(217, 82, 74, 0.18); border: 1px solid var(--separatist); }
 .factionTag[data-faction="mandalore"] { background: rgba(138, 148, 166, 0.2); border: 1px solid var(--mandalore); }
 
+.fleetList { display: flex; flex-direction: column; gap: 18px; }
+.fleetBlock {
+  border: 1px solid var(--nebula-line);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(10, 10, 20, 0.35);
+}
+.fleetHead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.fleetTitle { font-weight: 600; font-size: 14px; }
+
 .smallBtn, .smallBtnGhost {
   border-radius: 999px;
   padding: 4px 12px;
