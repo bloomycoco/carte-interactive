@@ -154,6 +154,9 @@ export default function GalaxyMap() {
               code: trimmed,
               name: data.fleet.name,
               faction: data.fleet.faction,
+              kills: data.fleet.kills,
+              losses: data.fleet.losses,
+              strength: data.fleet.strength,
               ships: data.ships.map((s: { id: string; name: string; dest_planet: string | null }) => ({
                 id: s.id,
                 name: s.name,
@@ -645,7 +648,9 @@ export default function GalaxyMap() {
                     {unlockedFleets.map((u) => (
                       <div key={u.id} className={styles.fleetRow}>
                         <span className={styles.fleetName}>{u.name}</span>
-                        <span className={styles.fleetStatus}>{u.ships.length} vaisseau(x)</span>
+                        <span className={styles.fleetStatus}>
+                          {u.ships.length} vaisseau(x) · ⚔ {u.strength} · {u.kills}V-{u.losses}D
+                        </span>
                         <button className={styles.fleetForget} onClick={() => forgetFleet(u.id)}>
                           oublier
                         </button>
@@ -690,13 +695,18 @@ export default function GalaxyMap() {
               {encounterShip.dest_planet ? ` sur la route vers ${encounterShip.dest_planet}` : ""}.
               Que fait l&apos;équipage ?
             </p>
+            {encounterShip.encounter_win_chance != null && (
+              <p className={styles.encounterOdds}>
+                Chances de victoire au combat : <strong>{encounterShip.encounter_win_chance}%</strong>
+              </p>
+            )}
             <div className={styles.encounterActions}>
               <button
                 className={styles.encounterFight}
                 disabled={resolvingEncounter}
                 onClick={() => resolveEncounter(encounterShip.id, "fight")}
               >
-                Combattre
+                Combattre{encounterShip.encounter_win_chance != null ? ` (${encounterShip.encounter_win_chance}%)` : ""}
               </button>
               <button
                 className={styles.encounterFlee}

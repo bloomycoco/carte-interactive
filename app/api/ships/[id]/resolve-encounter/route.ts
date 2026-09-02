@@ -24,6 +24,7 @@ export async function POST(
   const db = getDatabase();
   const rows = await db.sql<{
     id: string;
+    fleet_id: string;
     name: string;
     code: string;
     path: Waypoint[] | null;
@@ -31,8 +32,10 @@ export async function POST(
     arrival_at: string | null;
     encounter_pending: boolean;
     encounter_at: string | null;
+    encounter_win_chance: number | null;
   }>`
-    select id, name, code, path, departed_at, arrival_at, encounter_pending, encounter_at
+    select id, fleet_id, name, code, path, departed_at, arrival_at, encounter_pending, encounter_at,
+           encounter_win_chance
     from ships
     where id = ${id}::uuid
   `;
@@ -48,7 +51,7 @@ export async function POST(
     return NextResponse.json({ error: "la rencontre n'a pas encore eu lieu" }, { status: 400 });
   }
 
-  const won = choice === "fight" && rollCombatWin();
+  const won = choice === "fight" && rollCombatWin(ship.encounter_win_chance ?? 50);
 
   if (won) {
     // décale tout le calendrier du temps passé à décider : le trajet
@@ -61,11 +64,13 @@ export async function POST(
       update ships
       set departed_at = ${newDeparted.toISOString()}, arrival_at = ${newArrival.toISOString()},
           encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
+          encounter_win_chance = null,
           updated_at = now()
       where id = ${id}::uuid
       returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,
                 damaged, encounter_pending, encounter_at
     `;
+    await db.sql`update fleets set kills = kills + 1, updated_at = now() where id = ${ship.fleet_id}::uuid`;
     return NextResponse.json({ ship: updated[0], outcome: "won" });
   }
 
@@ -94,11 +99,13 @@ export async function POST(
         departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
         damaged = true,
         encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
+        encounter_win_chance = null,
         updated_at = now()
     where id = ${id}::uuid
     returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,
               damaged, encounter_pending, encounter_at
   `;
+  await db.sql`update fleets set losses = losses + 1, updated_at = now() where id = ${ship.fleet_id}::uuid`;
 
   return NextResponse.json({ ship: updated[0], outcome: choice === "flee" ? "fled" : "lost" });
 }

@@ -2,6 +2,7 @@ import { getDatabase } from "@netlify/database";
 import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/session";
 import { generateCode, type Faction } from "@/lib/fleets";
+import { fleetStrength } from "@/lib/ship-classes";
 
 const FACTIONS = ["republique", "csi", "mandalore"] as const;
 
@@ -13,19 +14,37 @@ export async function GET() {
 
   const db = getDatabase();
   const fleets = await db.sql`
-    select id, name, faction, code, created_at, updated_at from fleets order by created_at asc
+    select id, name, faction, code, kills, losses, created_at, updated_at
+    from fleets order by created_at asc
   `;
-  const ships = await db.sql`
+  const ships = await db.sql<{
+    id: string;
+    fleet_id: string;
+    name: string;
+    category: string | null;
+    code: string;
+    x: number;
+    y: number;
+    dest_x: number | null;
+    dest_y: number | null;
+    dest_planet: string | null;
+    departed_at: string | null;
+    arrival_at: string | null;
+    damaged: boolean;
+    encounter_pending: boolean;
+    created_at: string;
+    updated_at: string;
+  }>`
     select id, fleet_id, name, category, code, x, y, dest_x, dest_y, dest_planet,
            departed_at, arrival_at, damaged, encounter_pending, created_at, updated_at
     from ships
     order by created_at asc
   `;
 
-  const withShips = fleets.map((f) => ({
-    ...f,
-    ships: ships.filter((s) => s.fleet_id === f.id),
-  }));
+  const withShips = fleets.map((f) => {
+    const fleetShips = ships.filter((s) => s.fleet_id === f.id);
+    return { ...f, strength: Math.round(fleetStrength(fleetShips, f.kills, f.losses)), ships: fleetShips };
+  });
 
   return NextResponse.json({ fleets: withShips });
 }
@@ -53,9 +72,9 @@ export async function POST(request: Request) {
     const rows = await db.sql`
       insert into fleets (name, faction, code)
       values (${name}, ${faction}, ${code})
-      returning id, name, faction, code, created_at, updated_at
+      returning id, name, faction, code, kills, losses, created_at, updated_at
     `;
-    return NextResponse.json({ fleet: { ...rows[0], ships: [] } });
+    return NextResponse.json({ fleet: { ...rows[0], strength: fleetStrength([], 0, 0), ships: [] } });
   } catch {
     return NextResponse.json({ error: "ce code de flotte existe déjà" }, { status: 409 });
   }

@@ -178,6 +178,12 @@
 }
 .fleetHead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .fleetTitle { font-weight: 600; font-size: 14px; }
+.kdaTag {
+  font-family: var(--font-ibm-plex-mono), monospace;
+  font-size: 11px;
+  color: var(--star-dim);
+  white-space: nowrap;
+}
 
 .smallBtn, .smallBtnGhost {
   border-radius: 999px;

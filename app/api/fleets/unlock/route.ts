@@ -1,5 +1,6 @@
 import { getDatabase } from "@netlify/database";
 import { NextResponse } from "next/server";
+import { fleetStrength } from "@/lib/ship-classes";
 
 // Le code de FLOTTE donne un accès en LECTURE : la liste de ses vaisseaux
 // et leur statut, mais pas leur code — donc pas le contrôle. Il faut le
@@ -11,12 +12,27 @@ export async function POST(request: Request) {
 
   const db = getDatabase();
   const fleets = await db.sql`
-    select id, name, faction from fleets where code = ${code}
+    select id, name, faction, kills, losses from fleets where code = ${code}
   `;
   const fleet = fleets[0];
   if (!fleet) return NextResponse.json({ error: "code inconnu" }, { status: 404 });
 
-  const ships = await db.sql`
+  const ships = await db.sql<{
+    id: string;
+    name: string;
+    category: string | null;
+    x: number;
+    y: number;
+    dest_x: number | null;
+    dest_y: number | null;
+    dest_planet: string | null;
+    departed_at: string | null;
+    arrival_at: string | null;
+    path: unknown;
+    damaged: boolean;
+    encounter_pending: boolean;
+    encounter_at: string | null;
+  }>`
     select id, name, category, x, y, dest_x, dest_y, dest_planet, departed_at, arrival_at, path,
            damaged, encounter_pending, encounter_at
     from ships
@@ -24,5 +40,7 @@ export async function POST(request: Request) {
     order by created_at asc
   `;
 
-  return NextResponse.json({ fleet, ships });
+  const strength = Math.round(fleetStrength(ships, fleet.kills, fleet.losses));
+
+  return NextResponse.json({ fleet: { ...fleet, strength }, ships });
 }

@@ -27,8 +27,10 @@ function randomFraction() {
 const ENCOUNTER_MIN_TRAVEL_SECONDS = 90;
 // Probabilité qu'un trajet assez long déclenche une rencontre.
 const ENCOUNTER_CHANCE = 0.3;
-// Chances de gagner un combat choisi.
-const COMBAT_WIN_CHANCE = 0.55;
+// Force ennemie aléatoire (min/max) : comparable à une flotte modeste
+// de 1 à 2 vaisseaux moyens, pour que les chances restent disputées.
+const ENEMY_STRENGTH_MIN = 4;
+const ENEMY_STRENGTH_MAX = 16;
 
 // Tire au sort si une flotte ennemie sera croisée sur ce trajet et, si
 // oui, à quel moment (quelque part entre 20% et 80% du chemin — jamais
@@ -43,8 +45,19 @@ export function maybeScheduleEncounter(departedAt: Date, arrivalAt: Date): { enc
   return { encounterAt };
 }
 
-export function rollCombatWin() {
-  return randomFraction() < COMBAT_WIN_CHANCE;
+// Tire au sort la force de la flotte ennemie croisée et en déduit un %
+// de chances de victoire (ratio de forces) — affiché au joueur avant
+// qu'il ne choisisse de combattre ou fuir.
+export function rollEncounterOdds(friendlyStrength: number) {
+  const enemyStrength = ENEMY_STRENGTH_MIN + randomFraction() * (ENEMY_STRENGTH_MAX - ENEMY_STRENGTH_MIN);
+  const winChancePercent = Math.round((friendlyStrength / (friendlyStrength + enemyStrength)) * 100);
+  return Math.min(95, Math.max(5, winChancePercent));
+}
+
+// Résout un combat selon le % de chances déjà annoncé au joueur (calculé
+// par rollEncounterOdds au moment de la rencontre, pas re-tiré ici).
+export function rollCombatWin(winChancePercent: number) {
+  return randomFraction() * 100 < winChancePercent;
 }
 
 // Position d'un vaisseau au moment précis d'une rencontre programmée

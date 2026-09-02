@@ -25,9 +25,12 @@ export type ShipTravelState = {
   // routes. Null/absent = ancien trajet en ligne droite (rétrocompat).
   path?: Waypoint[] | null;
   // rencontre aléatoire en cours de route : le vaisseau se fige à
-  // encounter_at tant qu'elle n'est pas résolue (combattre / fuir).
+  // encounter_at tant qu'elle n'est pas résolue (combattre / fuir). Le
+  // % de chances de victoire est calculé et annoncé dès la programmation
+  // de la rencontre, pour que le joueur sache à quoi s'attendre.
   encounter_pending?: boolean;
   encounter_at?: string | null;
+  encounter_win_chance?: number | null;
 };
 
 // Un vaisseau tel que renseigné sur la carte publique — pas de code ici,
@@ -48,6 +51,9 @@ export type UnlockedFleet = {
   code: string;
   name: string;
   faction: Faction;
+  kills: number;
+  losses: number;
+  strength: number;
   ships: { id: string; name: string; dest_planet: string | null }[];
 };
 

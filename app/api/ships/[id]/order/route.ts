@@ -1,8 +1,15 @@
 import { getDatabase } from "@netlify/database";
 import { NextResponse } from "next/server";
-import { currentPosition, planTravelAlongPath, maybeScheduleEncounter, type Waypoint } from "@/lib/fleets";
+import {
+  currentPosition,
+  planTravelAlongPath,
+  maybeScheduleEncounter,
+  rollEncounterOdds,
+  type Waypoint,
+} from "@/lib/fleets";
 import { nearestPlanet, shortestPath } from "@/lib/routes";
 import { PLANETS } from "@/lib/planets";
+import { fleetStrength } from "@/lib/ship-classes";
 
 const CORUSCANT = PLANETS.find((p) => p.name === "Coruscant")!;
 
@@ -27,6 +34,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
   const db = getDatabase();
   const rows = await db.sql<{
     id: string;
+    fleet_id: string;
     name: string;
     code: string;
     x: number;
@@ -38,7 +46,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
     path: Waypoint[] | null;
     damaged: boolean;
   }>`
-    select id, name, code, x, y, dest_x, dest_y, departed_at, arrival_at, path, damaged
+    select id, fleet_id, name, code, x, y, dest_x, dest_y, departed_at, arrival_at, path, damaged
     from ships
     where id = ${id}::uuid
   `;
@@ -78,6 +86,21 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
   // pas de rencontre sur un trajet de repli forcé vers Coruscant
   const encounter = ship.damaged && !repaired ? null : maybeScheduleEncounter(departedAt, arrivalAt);
 
+  // si une rencontre est programmée, calcule les chances de victoire dès
+  // maintenant (force de la flotte au moment du départ), pour pouvoir
+  // les annoncer au joueur dès qu'il atteindra le point de rencontre
+  let winChance: number | null = null;
+  if (encounter) {
+    const [fleetRow] = await db.sql<{ kills: number; losses: number }>`
+      select kills, losses from fleets where id = ${ship.fleet_id}::uuid
+    `;
+    const fleetShips = await db.sql<{ category: string | null }>`
+      select category from ships where fleet_id = ${ship.fleet_id}::uuid
+    `;
+    const strength = fleetStrength(fleetShips, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0);
+    winChance = rollEncounterOdds(strength);
+  }
+
   const updated = await db.sql`
     update ships
     set x = ${origin.x}, y = ${origin.y},
@@ -87,11 +110,12 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
         damaged = ${repaired ? false : ship.damaged},
         encounter_pending = ${!!encounter},
         encounter_at = ${encounter ? encounter.encounterAt.toISOString() : null},
+        encounter_win_chance = ${winChance},
         encounter_x = null, encounter_y = null,
         updated_at = now()
     where id = ${id}::uuid
     returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,
-              damaged, encounter_pending, encounter_at
+              damaged, encounter_pending, encounter_at, encounter_win_chance
   `;
 
   return NextResponse.json({ ship: updated[0] });

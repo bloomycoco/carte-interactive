@@ -310,7 +310,12 @@
   font-size: 13.5px;
   line-height: 1.6;
   color: var(--star);
-  margin: 0 0 20px;
+  margin: 0 0 8px;
+}
+.encounterOdds {
+  font-size: 13px;
+  color: var(--signal);
+  margin: 0 0 18px;
 }
 .encounterActions { display: flex; gap: 12px; }
 .encounterActions button {

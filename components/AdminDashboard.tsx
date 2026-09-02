@@ -31,6 +31,9 @@ type FleetRow = {
   name: string;
   faction: Faction;
   code: string;
+  kills: number;
+  losses: number;
+  strength: number;
   ships: ShipRow[];
 };
 
@@ -420,6 +423,9 @@ export default function AdminDashboard({ role }: { role: Role }) {
                   </span>
                   <span className={styles.fleetTitle}>{f.name}</span>
                   <span className={styles.code}>{f.code}</span>
+                  <span className={styles.kdaTag} title="Force de la flotte (vaisseaux + expérience de combat)">
+                    ⚔ {f.strength} · {f.kills}V-{f.losses}D
+                  </span>
                   {isOwner && (
                     <div className={styles.actions}>
                       <button className={styles.smallBtnGhost} onClick={() => renameFleet(f.id, f.name)}>
