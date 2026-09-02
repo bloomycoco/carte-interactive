@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Cinzel, Manrope, IBM_Plex_Mono } from "next/font/google";
-import Script from "next/script";
 import "./globals.css";
 
 const cinzel = Cinzel({
@@ -32,13 +31,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="fr"
       className={`${cinzel.variable} ${manrope.variable} ${ibmPlexMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
-        <Script
-          src="https://identity.netlify.com/v1/netlify-identity-widget.js"
-          strategy="beforeInteractive"
-        />
-        {children}
-      </body>
+      <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
 }

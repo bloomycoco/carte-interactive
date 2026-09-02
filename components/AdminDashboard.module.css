@@ -99,7 +99,7 @@
   font-family: var(--font-manrope), sans-serif;
 }
 .inlineForm input:focus, .inlineForm select:focus { border-color: var(--signal); outline: none; }
-.coordInput { width: 84px; }
+.coordInput, .codeInput { width: 120px; }
 .inlineForm button {
   background: rgba(185, 139, 224, 0.15);
   border: 1px solid var(--signal);
@@ -128,15 +128,17 @@
 .tableWrap td { padding: 8px 10px; border-bottom: 1px solid rgba(42, 43, 74, 0.5); }
 .tableWrap tbody tr:hover { background: rgba(185, 139, 224, 0.05); }
 
-.email {
+.code {
+  font-family: var(--font-ibm-plex-mono), monospace;
   color: var(--star);
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  letter-spacing: 0.06em;
+  font-weight: 600;
 }
 
-.coords { font-family: var(--font-ibm-plex-mono), monospace; color: var(--star-dim); }
+.status { color: var(--star-dim); font-size: 12.5px; }
+.eta { color: var(--star); }
+
+.actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
 .tableWrap td select {
   background: var(--void);
@@ -148,7 +150,7 @@
   font-family: var(--font-manrope), sans-serif;
 }
 
-.roleTag, .factionTag {
+.factionTag {
   font-family: var(--font-ibm-plex-mono), monospace;
   font-size: 10.5px;
   letter-spacing: 0.04em;
@@ -158,16 +160,9 @@
   color: var(--star);
   white-space: nowrap;
 }
-.roleTag[data-role="owner"] { background: rgba(185, 139, 224, 0.25); border: 1px solid var(--signal); }
-.roleTag[data-role="gm"] { background: rgba(217, 160, 74, 0.2); border: 1px solid var(--cartel); }
-.roleTag[data-role="player"] { background: rgba(91, 143, 217, 0.2); border: 1px solid var(--republic); }
-
 .factionTag[data-faction="republique"] { background: rgba(91, 143, 217, 0.2); border: 1px solid var(--republic); }
 .factionTag[data-faction="csi"] { background: rgba(217, 82, 74, 0.18); border: 1px solid var(--separatist); }
 .factionTag[data-faction="mandalore"] { background: rgba(138, 148, 166, 0.2); border: 1px solid var(--mandalore); }
-
-.pendingList { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.pendingList li { display: flex; align-items: center; gap: 8px; font-size: 13px; flex-wrap: wrap; }
 
 .smallBtn, .smallBtnGhost {
   border-radius: 999px;

@@ -1,0 +1,27 @@
+.fleet {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 5;
+}
+
+.icon {
+  width: 9px;
+  height: 9px;
+  background: var(--fleet-color);
+  transform: rotate(45deg);
+  box-shadow: 0 0 0 2px rgba(10, 10, 20, 0.9), 0 0 8px 2px var(--fleet-color);
+}
+
+.fleet.traveling .icon {
+  animation: drift 1.4s ease-in-out infinite;
+}
+
+.fleet.mine .icon {
+  box-shadow: 0 0 0 2px #f3ecd9, 0 0 10px 3px var(--fleet-color);
+}
+
+@keyframes drift {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.5); }
+}

@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./GalaxyMap.module.css";
-import AuthWidget from "./AuthWidget";
+import SessionWidget from "./SessionWidget";
+import FleetLayer from "./FleetLayer";
+import { currentPosition, type PublicFleet, type UnlockedFleet } from "@/lib/fleet-motion";
 import {
   FACTION_META,
   MANUAL_ROUTES,
@@ -13,6 +15,8 @@ import {
   type Faction,
   type Planet,
 } from "@/lib/planets";
+
+const UNLOCKED_KEY = "atlas_unlocked_fleets";
 
 function mulberry32(seed: number) {
   return function () {
@@ -43,7 +47,127 @@ export default function GalaxyMap() {
   const [dragging, setDragging] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
 
+  const [fleets, setFleets] = useState<PublicFleet[]>([]);
+  const [unlockedFleets, setUnlockedFleets] = useState<UnlockedFleet[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = localStorage.getItem(UNLOCKED_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [fleetsOpen, setFleetsOpen] = useState(false);
+  const [unlockCode, setUnlockCode] = useState("");
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+  // nom de la planète pour laquelle le sélecteur de flotte est ouvert
+  const [sendChooserFor, setSendChooserFor] = useState<string | null>(null);
+  const [fleetNotice, setFleetNotice] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
   const view = useRef({ scale: 0.5, offX: 0, offY: 0 });
+
+  function persistUnlocked(list: UnlockedFleet[]) {
+    setUnlockedFleets(list);
+    try {
+      localStorage.setItem(UNLOCKED_KEY, JSON.stringify(list));
+    } catch {
+      // stockage indisponible : la session en mémoire suffit
+    }
+  }
+
+  // liste publique des flottes (positions), interpolation en direct
+  useEffect(() => {
+    let cancelled = false;
+    async function poll() {
+      try {
+        const res = await fetch("/api/fleets");
+        const data = await res.json();
+        if (!cancelled && res.ok) setFleets(data.fleets ?? []);
+      } catch {
+        // réseau indisponible : on retentera au prochain tick
+      }
+    }
+    void poll();
+    const id = setInterval(poll, 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  // horloge pour l'interpolation visuelle des trajets en cours
+  useEffect(() => {
+    let raf: number;
+    function tick() {
+      setNow(Date.now());
+      raf = requestAnimationFrame(tick);
+    }
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  async function unlockFleet(code: string) {
+    const trimmed = code.trim().toUpperCase();
+    if (!trimmed) return;
+    setUnlockError(null);
+    try {
+      const res = await fetch("/api/fleets/unlock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: trimmed }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setUnlockError(data.error ?? "code inconnu");
+        return;
+      }
+      const f = data.fleet as PublicFleet;
+      if (unlockedFleets.some((u) => u.id === f.id)) {
+        setUnlockCode("");
+        return;
+      }
+      persistUnlocked([
+        ...unlockedFleets,
+        { id: f.id, code: trimmed, name: f.name, faction: f.faction },
+      ]);
+      setUnlockCode("");
+    } catch {
+      setUnlockError("erreur réseau");
+    }
+  }
+
+  function forgetFleet(id: string) {
+    persistUnlocked(unlockedFleets.filter((u) => u.id !== id));
+  }
+
+  async function sendFleetTo(fleetId: string, planet: Planet) {
+    const unlocked = unlockedFleets.find((u) => u.id === fleetId);
+    if (!unlocked) return;
+    try {
+      const res = await fetch(`/api/fleets/${fleetId}/order`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: unlocked.code, destPlanet: planet.name, destX: planet.x, destY: planet.y }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFleetNotice(data.error ?? "échec de l'ordre");
+        return;
+      }
+      setFleets((prev) => prev.map((f) => (f.id === fleetId ? data.fleet : f)));
+      setFleetNotice(`${unlocked.name} en route vers ${planet.name}`);
+      setSendChooserFor(null);
+    } catch {
+      setFleetNotice("erreur réseau");
+    }
+  }
+
+  useEffect(() => {
+    if (!fleetNotice) return;
+    const id = setTimeout(() => setFleetNotice(null), 4000);
+    return () => clearTimeout(id);
+  }, [fleetNotice]);
 
   const routes = useMemo(() => {
     const NEIGHBOURS = 2;
@@ -336,6 +460,8 @@ export default function GalaxyMap() {
               </div>
             );
           })}
+
+          <FleetLayer fleets={fleets} unlockedFleets={unlockedFleets} now={now} />
         </div>
       </div>
 
@@ -397,9 +523,59 @@ export default function GalaxyMap() {
           <button className={styles.resetBtn} onClick={centerView}>
             Recentrer
           </button>
-          <AuthWidget />
+
+          <div className={styles.fleetsWrap}>
+            <button
+              className={`${styles.chip} ${fleetsOpen ? styles.chipActive : ""}`}
+              onClick={() => setFleetsOpen((v) => !v)}
+            >
+              Mes Flottes{unlockedFleets.length > 0 ? ` (${unlockedFleets.length})` : ""}
+            </button>
+            {fleetsOpen && (
+              <div className={styles.fleetsDropdown}>
+                {unlockedFleets.length === 0 && (
+                  <div className={styles.fleetsEmpty}>Aucune flotte déverrouillée.</div>
+                )}
+                {unlockedFleets.map((u) => {
+                  const live = fleets.find((f) => f.id === u.id);
+                  const pos = live ? currentPosition(live, now) : null;
+                  return (
+                    <div key={u.id} className={styles.fleetRow}>
+                      <span className={styles.fleetName}>{u.name}</span>
+                      <span className={styles.fleetStatus}>
+                        {live?.dest_planet ? `→ ${live.dest_planet}` : "à quai"}
+                        {pos?.traveling ? " (en transit)" : ""}
+                      </span>
+                      <button className={styles.fleetForget} onClick={() => forgetFleet(u.id)}>
+                        oublier
+                      </button>
+                    </div>
+                  );
+                })}
+                <form
+                  className={styles.fleetUnlockForm}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    unlockFleet(unlockCode);
+                  }}
+                >
+                  <input
+                    placeholder="Code de flotte"
+                    value={unlockCode}
+                    onChange={(e) => setUnlockCode(e.target.value)}
+                  />
+                  <button type="submit">Déverrouiller</button>
+                </form>
+                {unlockError && <div className={styles.fleetError}>{unlockError}</div>}
+              </div>
+            )}
+          </div>
+
+          <SessionWidget />
         </div>
       </div>
+
+      {fleetNotice && <div className={styles.fleetToast}>{fleetNotice}</div>}
 
       <div className={styles.hint}>molette pour zoomer · glisser pour naviguer · clic sur un système</div>
       <div className={styles.legend}>
@@ -446,9 +622,39 @@ export default function GalaxyMap() {
               >
                 Lien ↗
               </a>
-              <button className={`${styles.actionBtn} ${styles.actionBtnDisabled}`} disabled title="Bientôt disponible — nécessite un compte avec une flotte">
-                Envoyer Flotte
-              </button>
+              {unlockedFleets.length > 0 ? (
+                <div className={styles.sendWrap}>
+                  <button
+                    className={styles.actionBtn}
+                    onClick={() =>
+                      setSendChooserFor((cur) => (cur === selected.name ? null : selected.name))
+                    }
+                  >
+                    Envoyer Flotte
+                  </button>
+                  {sendChooserFor === selected.name && (
+                    <div className={styles.sendChooser}>
+                      {unlockedFleets.map((u) => (
+                        <button
+                          key={u.id}
+                          className={styles.sendChooserRow}
+                          onClick={() => selected && sendFleetTo(u.id, selected)}
+                        >
+                          {u.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <button
+                  className={`${styles.actionBtn} ${styles.actionBtnDisabled}`}
+                  disabled
+                  title="Déverrouille une flotte avec son code (bouton « Mes Flottes ») pour lui donner des ordres"
+                >
+                  Envoyer Flotte
+                </button>
+              )}
             </div>
           </div>
         ) : (

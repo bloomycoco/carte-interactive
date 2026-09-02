@@ -196,7 +196,108 @@
 }
 .chip .swatch { width: 9px; height: 9px; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px var(--c); }
 .chip.off { opacity: 0.4; }
+.chip.chipActive { border-color: var(--signal); color: var(--star); }
 .chip:hover { border-color: var(--signal); }
+
+.fleetsWrap { position: relative; }
+.fleetsDropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--nebula-line);
+  background: rgba(10, 10, 20, 0.95);
+  backdrop-filter: blur(8px);
+  min-width: 220px;
+  z-index: 20;
+}
+.fleetsEmpty { color: var(--star-dim); font-size: 12px; font-family: var(--font-ibm-plex-mono), monospace; }
+.fleetRow { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.fleetName { color: var(--star); font-weight: 600; }
+.fleetStatus { color: var(--star-dim); flex: 1; font-size: 11.5px; }
+.fleetForget {
+  background: transparent;
+  border: none;
+  color: var(--star-dim);
+  font-size: 10.5px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.fleetForget:hover { color: var(--separatist); }
+.fleetUnlockForm { display: flex; gap: 6px; border-top: 1px solid var(--nebula-line); padding-top: 8px; }
+.fleetUnlockForm input {
+  flex: 1;
+  background: var(--void);
+  border: 1px solid var(--nebula-line);
+  color: var(--star);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  font-family: var(--font-manrope), sans-serif;
+  min-width: 0;
+}
+.fleetUnlockForm input:focus { border-color: var(--signal); outline: none; }
+.fleetUnlockForm button {
+  background: rgba(185, 139, 224, 0.2);
+  border: 1px solid var(--signal);
+  color: var(--star);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fleetError { color: var(--separatist); font-size: 11px; font-family: var(--font-ibm-plex-mono), monospace; }
+
+.fleetToast {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(10, 10, 20, 0.92);
+  border: 1px solid var(--signal);
+  color: var(--star);
+  padding: 9px 18px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-family: var(--font-manrope), sans-serif;
+  z-index: 30;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+
+.sendWrap { position: relative; }
+.sendChooser {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--nebula-line);
+  background: rgba(10, 10, 20, 0.95);
+  backdrop-filter: blur(8px);
+  min-width: 160px;
+  z-index: 25;
+}
+.sendChooserRow {
+  background: transparent;
+  border: none;
+  color: var(--star);
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-family: var(--font-manrope), sans-serif;
+  cursor: pointer;
+}
+.sendChooserRow:hover { background: rgba(185, 139, 224, 0.15); }
 
 .resetBtn {
   padding: 7px 14px;

@@ -1,3 +1,5 @@
+.wrap { position: relative; }
+
 .pill {
   padding: 7px 16px;
   border-radius: 999px;
@@ -11,7 +13,49 @@
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 .pill:hover { border-color: #b98be0; background: rgba(185, 139, 224, 0.2); }
-.pill:disabled { opacity: 0.6; cursor: default; }
+
+.loginForm {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid #2a2b4a;
+  background: rgba(10, 10, 20, 0.95);
+  backdrop-filter: blur(8px);
+  min-width: 180px;
+  z-index: 20;
+}
+.loginForm select, .loginForm input {
+  background: #0a0a14;
+  border: 1px solid #2a2b4a;
+  color: #f3ecd9;
+  border-radius: 6px;
+  padding: 7px 9px;
+  font-size: 13px;
+  font-family: var(--font-manrope), sans-serif;
+}
+.loginForm select:focus, .loginForm input:focus { border-color: #b98be0; outline: none; }
+.loginForm button {
+  background: rgba(185, 139, 224, 0.2);
+  border: 1px solid #b98be0;
+  color: #f3ecd9;
+  border-radius: 6px;
+  padding: 7px 9px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.loginForm button:hover { background: rgba(185, 139, 224, 0.32); }
+.loginForm button:disabled { opacity: 0.5; cursor: default; }
+.formError {
+  color: #d9524a;
+  font-size: 11.5px;
+  font-family: var(--font-ibm-plex-mono), monospace;
+}
 
 .userPill {
   display: flex;
@@ -47,16 +91,7 @@
   color: #f3ecd9;
 }
 .role[data-role="owner"] { background: rgba(185, 139, 224, 0.25); border: 1px solid #b98be0; }
-.role[data-role="gm"] { background: rgba(217, 160, 74, 0.2); border: 1px solid #d9a04a; }
-.role[data-role="player"] { background: rgba(91, 143, 217, 0.2); border: 1px solid #5b8fd9; }
-
-.email {
-  color: #a7a4c2;
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.role[data-role="admin"] { background: rgba(217, 160, 74, 0.2); border: 1px solid #d9a04a; }
 
 .logout {
   width: 22px;
