@@ -225,9 +225,3 @@ export const ZONE_POLYGONS: Record<string, string> = {
   mandalore:
     "M350,250 L700,180 L950,320 L1000,600 L850,850 L600,900 L350,750 L230,480 Z",
 };
-
-// each planet links to its nearest real neighbour, and Mandalore is
-// bridged to Sullust so its cluster isn't stranded off the main lanes
-export const MANUAL_ROUTES: [number, number, number, number][] = [
-  [650, 550, 1729, 1638],
-];

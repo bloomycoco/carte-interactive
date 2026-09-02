@@ -7,7 +7,7 @@ export async function GET() {
   const db = getDatabase();
   const ships = await db.sql`
     select s.id, s.name, s.category, f.faction, s.x, s.y, s.dest_x, s.dest_y, s.dest_planet,
-           s.departed_at, s.arrival_at
+           s.departed_at, s.arrival_at, s.path
     from ships s
     join fleets f on f.id = s.fleet_id
     order by s.created_at asc

@@ -37,7 +37,7 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/ship
     await db.sql`
       update ships
       set x = ${x}, y = ${y}, dest_x = null, dest_y = null, dest_planet = null,
-          departed_at = null, arrival_at = null, updated_at = now()
+          path = null, departed_at = null, arrival_at = null, updated_at = now()
       where id = ${id}::uuid
     `;
   }

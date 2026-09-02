@@ -12,7 +12,6 @@ import {
 } from "@/lib/fleet-motion";
 import {
   FACTION_META,
-  MANUAL_ROUTES,
   PLANETS,
   WORLD_H,
   WORLD_W,
@@ -20,6 +19,7 @@ import {
   type Faction,
   type Planet,
 } from "@/lib/planets";
+import { ROUTE_EDGES } from "@/lib/routes";
 
 const UNLOCKED_FLEETS_KEY = "atlas_unlocked_fleets";
 const UNLOCKED_SHIPS_KEY = "atlas_unlocked_ships";
@@ -232,24 +232,13 @@ export default function GalaxyMap() {
   }, [fleetNotice]);
 
   const routes = useMemo(() => {
-    const NEIGHBOURS = 2;
-    const drawn = new Set<string>();
-    const lines: { x1: number; y1: number; x2: number; y2: number }[] = [];
-
-    for (const p of PLANETS) {
-      const nearest = PLANETS.filter((o) => o !== p)
-        .map((o) => ({ o, d: (o.x - p.x) ** 2 + (o.y - p.y) ** 2 }))
-        .sort((a, b) => a.d - b.d)
-        .slice(0, NEIGHBOURS);
-
-      for (const { o } of nearest) {
-        const key = [p.name, o.name].sort().join("|");
-        if (drawn.has(key)) continue;
-        drawn.add(key);
-        lines.push({ x1: p.x, y1: p.y, x2: o.x, y2: o.y });
-      }
-    }
-    return lines;
+    const byName = new Map(PLANETS.map((p) => [p.name, p]));
+    return ROUTE_EDGES.map(({ a, b }) => {
+      const pa = byName.get(a);
+      const pb = byName.get(b);
+      if (!pa || !pb) return null;
+      return { x1: pa.x, y1: pa.y, x2: pb.x, y2: pb.y };
+    }).filter((l): l is { x1: number; y1: number; x2: number; y2: number } => l !== null);
   }, []);
 
   const matches = useMemo(() => {
@@ -476,17 +465,6 @@ export default function GalaxyMap() {
                   y1={r.y1}
                   x2={r.x2}
                   y2={r.y2}
-                  stroke="rgba(180,185,225,0.16)"
-                  strokeWidth="1"
-                />
-              ))}
-              {MANUAL_ROUTES.map(([x1, y1, x2, y2], i) => (
-                <line
-                  key={`manual-${i}`}
-                  x1={x1}
-                  y1={y1}
-                  x2={x2}
-                  y2={y2}
                   stroke="rgba(180,185,225,0.16)"
                   strokeWidth="1"
                 />
