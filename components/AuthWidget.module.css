@@ -26,6 +26,17 @@
   font-size: 12.5px;
 }
 
+.adminLink {
+  font-family: var(--font-ibm-plex-mono), monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #a7a4c2;
+  text-decoration: none;
+  padding: 3px 4px;
+}
+.adminLink:hover { color: #f3ecd9; }
+
 .role {
   font-family: var(--font-ibm-plex-mono), monospace;
   font-size: 10.5px;

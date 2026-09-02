@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import type * as NetlifyIdentity from "netlify-identity-widget";
 import styles from "./AuthWidget.module.css";
 
@@ -114,6 +115,11 @@ export default function AuthWidget() {
 
   return (
     <div className={styles.userPill}>
+      {(profile.role === "owner" || profile.role === "gm") && (
+        <Link href="/admin" className={styles.adminLink}>
+          Admin
+        </Link>
+      )}
       <span className={styles.role} data-role={profile.role}>
         {ROLE_LABEL[profile.role]}
       </span>
