@@ -272,10 +272,10 @@ export default function GalaxyMap() {
                 className={`${styles.zonePoly} ${hiddenFactions.has(f) ? styles.hidden : ""}`}
                 filter="url(#soften)"
               >
-                <path className="fill" fill={`var(--${f === "csi" ? "separatist" : f})`} d={ZONE_POLYGONS[f]} />
+                <path className="fill" fill={FACTION_META[f].color} d={ZONE_POLYGONS[f]} />
                 <path
                   className="line"
-                  stroke={`var(--${f === "csi" ? "separatist" : f})`}
+                  stroke={FACTION_META[f].color}
                   d={ZONE_POLYGONS[f]}
                 />
               </g>
@@ -433,6 +433,19 @@ export default function GalaxyMap() {
               <div>
                 SECT.Y <b>{selected.y}</b>
               </div>
+            </div>
+            <div className={styles.panelActions}>
+              <a
+                className={styles.actionBtn}
+                href={`https://starwars.fandom.com/wiki/${encodeURIComponent(selected.name.replace(/ /g, "_"))}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Lien ↗
+              </a>
+              <button className={`${styles.actionBtn} ${styles.actionBtnDisabled}`} disabled title="Bientôt disponible — nécessite un compte avec une flotte">
+                Envoyer Flotte
+              </button>
             </div>
           </div>
         ) : (

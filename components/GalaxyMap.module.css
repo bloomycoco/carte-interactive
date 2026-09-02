@@ -324,6 +324,37 @@
 }
 .panel .coords b { color: var(--star); font-weight: 500; }
 
+.panelActions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 20px;
+}
+.actionBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--nebula-line);
+  background: rgba(185,139,224,0.1);
+  color: var(--star);
+  font-family: var(--font-manrope), sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.actionBtn:hover { border-color: var(--signal); background: rgba(185,139,224,0.18); }
+.actionBtnDisabled {
+  background: transparent;
+  color: var(--star-dim);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.actionBtnDisabled:hover { border-color: var(--nebula-line); background: transparent; }
+
 .panelEmpty {
   display: flex;
   flex-direction: column;
