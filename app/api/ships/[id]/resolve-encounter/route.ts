@@ -43,9 +43,10 @@ export async function POST(
     encounter_win_chance: number | null;
     encounter_x: number | null;
     encounter_y: number | null;
+    encounter_npc_ship_id: string | null;
   }>`
     select id, fleet_id, name, code, path, departed_at, arrival_at, encounter_pending, encounter_at,
-           encounter_win_chance, encounter_x, encounter_y
+           encounter_win_chance, encounter_x, encounter_y, encounter_npc_ship_id
     from ships
     where id = ${id}::uuid
   `;
@@ -66,6 +67,17 @@ export async function POST(
       ? { x: ship.encounter_x, y: ship.encounter_y }
       : positionAt(ship.path, new Date(ship.departed_at), new Date(ship.arrival_at), encounterAt);
 
+  // quel que soit le choix, le vaisseau NPC croisé redevient libre de
+  // reprendre sa route
+  if (ship.encounter_npc_ship_id) {
+    await db.sql`
+      update ships
+      set encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
+          updated_at = now()
+      where id = ${ship.encounter_npc_ship_id}::uuid
+    `;
+  }
+
   async function resume(outcome: "won" | "negotiated") {
     // décale tout le calendrier du temps passé à décider : le trajet
     // reprend exactement là où il s'était figé, sans rien perdre.
@@ -77,7 +89,7 @@ export async function POST(
       update ships
       set departed_at = ${newDeparted.toISOString()}, arrival_at = ${newArrival.toISOString()},
           encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
-          encounter_win_chance = null, encounter_enemy_faction = null,
+          encounter_win_chance = null, encounter_enemy_faction = null, encounter_npc_ship_id = null,
           updated_at = now()
       where id = ${id}::uuid
       returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,
@@ -114,7 +126,7 @@ export async function POST(
           departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
           damaged = true,
           encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
-          encounter_win_chance = null, encounter_enemy_faction = null,
+          encounter_win_chance = null, encounter_enemy_faction = null, encounter_npc_ship_id = null,
           updated_at = now()
       where id = ${id}::uuid
       returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,
@@ -151,7 +163,7 @@ export async function POST(
           path = ${JSON.stringify(waypoints)}::jsonb,
           departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
           encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
-          encounter_win_chance = null, encounter_enemy_faction = null,
+          encounter_win_chance = null, encounter_enemy_faction = null, encounter_npc_ship_id = null,
           updated_at = now()
       where id = ${id}::uuid
       returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,

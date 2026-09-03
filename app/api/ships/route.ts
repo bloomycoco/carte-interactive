@@ -3,13 +3,13 @@ import { NextResponse } from "next/server";
 import {
   currentPosition,
   planTravelAlongPath,
-  pickNpcDestination,
+  pickNpcRoute,
   rollEncounterOdds,
   ENCOUNTER_PROXIMITY,
   type Faction,
   type Waypoint,
 } from "@/lib/fleets";
-import { nearestPlanet, shortestPath } from "@/lib/routes";
+import { nearestPlanet } from "@/lib/routes";
 import { fleetStrength } from "@/lib/ship-classes";
 
 type ShipRow = {
@@ -32,6 +32,7 @@ type ShipRow = {
   encounter_at: string | null;
   encounter_win_chance: number | null;
   encounter_enemy_faction: Faction | null;
+  encounter_npc_ship_id: string | null;
   action_type: "influence" | "seized" | null;
   action_started_at: string | null;
   action_ends_at: string | null;
@@ -53,7 +54,7 @@ export async function GET() {
            s.x, s.y, s.dest_x, s.dest_y, s.dest_planet,
            s.departed_at, s.arrival_at, s.path, s.damaged,
            s.encounter_pending, s.encounter_at, s.encounter_win_chance, s.encounter_enemy_faction,
-           s.action_type, s.action_started_at, s.action_ends_at
+           s.encounter_npc_ship_id, s.action_type, s.action_started_at, s.action_ends_at
     from ships s
     join fleets f on f.id = s.fleet_id
     order by s.created_at asc
@@ -75,10 +76,9 @@ export async function GET() {
     }
 
     const originPlanet = nearestPlanet(pos.x, pos.y);
-    const dest = pickNpcDestination(ship.faction, originPlanet.name);
-    if (!dest) continue;
-    const routePath = shortestPath(originPlanet.name, dest.name);
-    if (!routePath) continue;
+    const route = pickNpcRoute(ship.faction, originPlanet.name);
+    if (!route) continue;
+    const { destination: dest, path: routePath } = route;
     const firstHop = routePath[0];
     const startsAtFirstHop = firstHop.x === pos.x && firstHop.y === pos.y;
     const waypoints: Waypoint[] = [
@@ -107,8 +107,11 @@ export async function GET() {
 
   // 2) rencontres réelles : un vaisseau République en transit qui croise
   // un NPC en transit (distance < ENCOUNTER_PROXIMITY) déclenche une
-  // rencontre — figé immédiatement à sa position actuelle
-  const npcTraveling = ships.filter((s) => s.is_npc && currentPosition(s, now).traveling);
+  // rencontre — les DEUX vaisseaux sont figés à leur position actuelle
+  // tant qu'elle n'est pas résolue (le NPC ne peut pas non plus bouger).
+  const npcTraveling = ships.filter(
+    (s) => s.is_npc && !s.encounter_pending && currentPosition(s, now).traveling,
+  );
   const republicShips = ships.filter(
     (s) => !s.is_npc && s.faction === "republique" && !s.damaged && !s.encounter_pending,
   );
@@ -136,11 +139,13 @@ export async function GET() {
     const strength = fleetStrength(fleetShips, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0);
     const winChance = rollEncounterOdds(strength);
     const encounterAtIso = new Date(now).toISOString();
+    const npcPos = currentPosition(closest, now);
 
     await db.sql`
       update ships
       set encounter_pending = true, encounter_at = ${encounterAtIso}, encounter_win_chance = ${winChance},
           encounter_x = ${pos.x}, encounter_y = ${pos.y}, encounter_enemy_faction = ${closest.faction},
+          encounter_npc_ship_id = ${closest.id}::uuid,
           updated_at = now()
       where id = ${ship.id}::uuid
     `;
@@ -148,6 +153,22 @@ export async function GET() {
     ship.encounter_at = encounterAtIso;
     ship.encounter_win_chance = winChance;
     ship.encounter_enemy_faction = closest.faction;
+    ship.encounter_npc_ship_id = closest.id;
+
+    // le vaisseau NPC croisé est lui aussi figé, à la même heure, tant
+    // que le joueur République n'a pas tranché
+    await db.sql`
+      update ships
+      set encounter_pending = true, encounter_at = ${encounterAtIso},
+          encounter_x = ${npcPos.x}, encounter_y = ${npcPos.y},
+          updated_at = now()
+      where id = ${closest.id}::uuid
+    `;
+    closest.encounter_pending = true;
+    closest.encounter_at = encounterAtIso;
+    // retiré de la liste des cibles disponibles pour ce même passage
+    const idx = npcTraveling.indexOf(closest);
+    if (idx !== -1) npcTraveling.splice(idx, 1);
   }
 
   return NextResponse.json({ ships });

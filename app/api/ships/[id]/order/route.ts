@@ -6,13 +6,16 @@ import { PLANETS } from "@/lib/planets";
 import { SEIZURE_DURATION_SECONDS } from "@/lib/planet-actions";
 
 const CORUSCANT = PLANETS.find((p) => p.name === "Coruscant")!;
+const NAL_HUTTA = PLANETS.find((p) => p.name === "Nal Hutta")!;
 
 // Envoie un vaisseau vers une planète, en suivant le réseau de routes
 // (jamais en ligne droite) — la durée dépend de la distance réelle par
 // les routes. Croiser une flotte NPC en chemin déclenche une rencontre
 // (voir le tick dans GET /api/ships), et arriver sur un monde du Cartel
-// risque une saisie du vaisseau. Accessible à quiconque connaît le code
-// DU VAISSEAU (le code de sa flotte ne suffit pas).
+// risque une saisie du vaisseau : il est alors détourné vers Nal Hutta
+// (capitale du Cartel), peu importe la destination demandée. Accessible
+// à quiconque connaît le code DU VAISSEAU (le code de sa flotte ne
+// suffit pas).
 export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/order">) {
   const { id } = await ctx.params;
   const body = await request.json().catch(() => null);
@@ -110,24 +113,44 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
   ];
   const { departedAt, arrivalAt } = planTravelAlongPath(waypoints);
 
-  // arriver sur un monde du Cartel risque une saisie du vaisseau (50%),
-  // tirée au sort dès maintenant et révélée à l'arrivée — sauf pour un
-  // vaisseau du Cartel lui-même, chez lui
+  let finalDestination = destination;
+  let finalWaypoints = waypoints;
+  let finalDepartedAt = departedAt;
+  let finalArrivalAt = arrivalAt;
   let actionType: string | null = null;
   let actionStartedAt: string | null = null;
   let actionEndsAt: string | null = null;
+
+  // arriver sur un monde du Cartel risque une saisie du vaisseau (50%),
+  // tirée au sort dès maintenant : détourné vers Nal Hutta au lieu de sa
+  // destination prévue, révélé dès le départ — sauf pour un vaisseau du
+  // Cartel lui-même, chez lui
   if (destination.faction === "cartel" && ship.faction !== "cartel" && rollCartelSeizure()) {
-    actionType = "seized";
-    actionStartedAt = arrivalAt.toISOString();
-    actionEndsAt = new Date(arrivalAt.getTime() + SEIZURE_DURATION_SECONDS * 1000).toISOString();
+    const seizurePath = shortestPath(originPlanet.name, NAL_HUTTA.name);
+    if (seizurePath) {
+      const seizureFirstHop = seizurePath[0];
+      const seizureStartsAtFirstHop = seizureFirstHop.x === origin.x && seizureFirstHop.y === origin.y;
+      const seizureWaypoints: Waypoint[] = [
+        { x: origin.x, y: origin.y },
+        ...(seizureStartsAtFirstHop ? seizurePath.slice(1) : seizurePath).map((p) => ({ x: p.x, y: p.y })),
+      ];
+      const seizureTravel = planTravelAlongPath(seizureWaypoints);
+      finalDestination = NAL_HUTTA;
+      finalWaypoints = seizureWaypoints;
+      finalDepartedAt = seizureTravel.departedAt;
+      finalArrivalAt = seizureTravel.arrivalAt;
+      actionType = "seized";
+      actionStartedAt = finalArrivalAt.toISOString();
+      actionEndsAt = new Date(finalArrivalAt.getTime() + SEIZURE_DURATION_SECONDS * 1000).toISOString();
+    }
   }
 
   const updated = await db.sql`
     update ships
     set x = ${origin.x}, y = ${origin.y},
-        dest_x = ${destination.x}, dest_y = ${destination.y}, dest_planet = ${destination.name},
-        path = ${JSON.stringify(waypoints)}::jsonb,
-        departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
+        dest_x = ${finalDestination.x}, dest_y = ${finalDestination.y}, dest_planet = ${finalDestination.name},
+        path = ${JSON.stringify(finalWaypoints)}::jsonb,
+        departed_at = ${finalDepartedAt.toISOString()}, arrival_at = ${finalArrivalAt.toISOString()},
         damaged = ${repaired ? false : ship.damaged},
         encounter_pending = false, encounter_at = null, encounter_win_chance = null,
         encounter_x = null, encounter_y = null, encounter_enemy_faction = null,

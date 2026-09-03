@@ -71,21 +71,31 @@ export function nearestPlanet(x: number, y: number): Planet {
 }
 
 // Plus court chemin (Dijkstra, graphe assez petit pour un O(n²) simple)
-// entre deux planètes du réseau. Renvoie la liste ordonnée des planètes
-// traversées (origine et destination incluses), ou null si injoignable.
-export function shortestPath(fromName: string, toName: string): Planet[] | null {
+// entre deux planètes du réseau. `allowed`, si fourni, restreint le
+// trajet à ne traverser QUE des planètes de cet ensemble (utilisé pour
+// que les flottes NPC ne quittent jamais leur territoire, même en
+// chemin — pas seulement à l'arrivée). Renvoie la liste ordonnée des
+// planètes traversées (origine et destination incluses), ou null si
+// injoignable.
+export function shortestPath(
+  fromName: string,
+  toName: string,
+  allowed?: Set<string>,
+): Planet[] | null {
   const start = PLANET_BY_NAME.get(fromName);
   const end = PLANET_BY_NAME.get(toName);
   if (!start || !end) return null;
+  if (allowed && (!allowed.has(fromName) || !allowed.has(toName))) return null;
   if (fromName === toName) return [start];
 
+  const nodes = allowed ?? new Set(PLANETS.map((p) => p.name));
   const dists = new Map<string, number>();
   const prev = new Map<string, string>();
   const visited = new Set<string>();
-  for (const p of PLANETS) dists.set(p.name, Infinity);
+  for (const name of nodes) dists.set(name, Infinity);
   dists.set(fromName, 0);
 
-  while (visited.size < PLANETS.length) {
+  while (visited.size < nodes.size) {
     let u: string | null = null;
     let best = Infinity;
     for (const [name, d] of dists) {
@@ -97,7 +107,7 @@ export function shortestPath(fromName: string, toName: string): Planet[] | null 
     if (u === null || u === toName) break;
     visited.add(u);
     for (const { name: v, dist: w } of ADJACENCY.get(u) ?? []) {
-      if (visited.has(v)) continue;
+      if (!nodes.has(v) || visited.has(v)) continue;
       const alt = best + w;
       if (alt < (dists.get(v) ?? Infinity)) {
         dists.set(v, alt);
@@ -120,4 +130,25 @@ export function shortestPath(fromName: string, toName: string): Planet[] | null 
 
   const planets = path.map((n) => PLANET_BY_NAME.get(n)).filter((p): p is Planet => !!p);
   return planets.length === path.length ? planets : null;
+}
+
+// Ensemble des planètes atteignables depuis `fromName` sans jamais
+// quitter `allowed` (parcours en largeur, ne regarde que la
+// connectivité — pas les distances).
+export function reachableWithin(fromName: string, allowed: Set<string>): Set<string> {
+  const visited = new Set<string>();
+  if (!allowed.has(fromName)) return visited;
+  visited.add(fromName);
+  const queue = [fromName];
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    for (const { name: v } of ADJACENCY.get(cur) ?? []) {
+      if (allowed.has(v) && !visited.has(v)) {
+        visited.add(v);
+        queue.push(v);
+      }
+    }
+  }
+  visited.delete(fromName);
+  return visited;
 }

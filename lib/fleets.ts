@@ -4,6 +4,7 @@
 import crypto from "node:crypto";
 import { currentPosition, type Faction, type Waypoint } from "./fleet-motion";
 import { PLANETS, type Planet } from "./planets";
+import { reachableWithin, shortestPath } from "./routes";
 
 export * from "./fleet-motion";
 
@@ -87,11 +88,24 @@ export function positionAt(
   );
 }
 
-// Choisit une destination aléatoire pour une flotte NPC : une planète de
-// son propre clan, différente de celle où elle se trouve déjà (les NPC
-// ne quittent jamais leur territoire).
-export function pickNpcDestination(faction: Faction, currentPlanetName: string): Planet | null {
-  const candidates = PLANETS.filter((p) => p.faction === faction && p.name !== currentPlanetName);
-  if (candidates.length === 0) return null;
-  return candidates[crypto.randomInt(candidates.length)];
+// Choisit une destination aléatoire ET son trajet pour une flotte NPC :
+// une planète de son propre clan, ATTEIGNABLE sans jamais quitter le
+// territoire de ce clan (le chemin lui-même est restreint aux planètes
+// du clan, pas seulement la destination — sinon le trajet le plus court
+// peut couper à travers un territoire voisin).
+export function pickNpcRoute(
+  faction: Faction,
+  currentPlanetName: string,
+): { destination: Planet; path: Planet[] } | null {
+  const allowed = new Set(PLANETS.filter((p) => p.faction === faction).map((p) => p.name));
+  const reachable = [...reachableWithin(currentPlanetName, allowed)];
+  if (reachable.length === 0) return null;
+
+  const destName = reachable[crypto.randomInt(reachable.length)];
+  const path = shortestPath(currentPlanetName, destName, allowed);
+  if (!path) return null;
+
+  const destination = PLANETS.find((p) => p.name === destName);
+  if (!destination) return null;
+  return { destination, path };
 }
