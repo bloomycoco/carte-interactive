@@ -39,3 +39,8 @@
 .fleet.damaged:not(.stuck) .icon {
   filter: saturate(0.4) brightness(0.8);
 }
+
+.fleet.busy:not(.stuck) .icon {
+  background: #d9a04a;
+  box-shadow: 0 0 0 2px rgba(10, 10, 20, 0.9), 0 0 10px 3px #d9a04a;
+}

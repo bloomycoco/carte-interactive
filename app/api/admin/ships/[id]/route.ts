@@ -40,6 +40,7 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/ship
       set x = ${x}, y = ${y}, dest_x = null, dest_y = null, dest_planet = null,
           path = null, departed_at = null, arrival_at = null, damaged = false,
           encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
+          action_type = null, action_started_at = null, action_ends_at = null,
           updated_at = now()
       where id = ${id}::uuid
     `;
@@ -55,7 +56,8 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/ship
 
   const rows = await db.sql`
     select id, fleet_id, name, category, code, x, y, dest_x, dest_y, dest_planet,
-           departed_at, arrival_at, damaged, encounter_pending, created_at, updated_at
+           departed_at, arrival_at, damaged, encounter_pending, action_type, action_started_at,
+           action_ends_at, created_at, updated_at
     from ships
     where id = ${id}::uuid
   `;

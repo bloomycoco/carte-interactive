@@ -237,6 +237,19 @@
   cursor: pointer;
 }
 .fleetForget:hover { color: var(--separatist); }
+.fleetActionBtn {
+  background: rgba(185, 139, 224, 0.18);
+  border: 1px solid var(--signal);
+  color: var(--star);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fleetActionBtn:hover:not(:disabled) { background: rgba(185, 139, 224, 0.3); }
+.fleetActionBtn:disabled { opacity: 0.5; cursor: default; }
 .fleetUnlockForm { display: flex; gap: 6px; border-top: 1px solid var(--nebula-line); padding-top: 8px; }
 .fleetUnlockForm input {
   flex: 1;

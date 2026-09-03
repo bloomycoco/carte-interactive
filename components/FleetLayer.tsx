@@ -1,7 +1,8 @@
 "use client";
 
 import { FACTION_META } from "@/lib/planets";
-import { currentPosition, type PublicShip, type UnlockedShip } from "@/lib/fleet-motion";
+import { currentPosition, isActionActive, type PublicShip, type UnlockedShip } from "@/lib/fleet-motion";
+import { ACTION_LABEL } from "@/lib/planet-actions";
 import styles from "./FleetLayer.module.css";
 
 export default function FleetLayer({
@@ -20,8 +21,10 @@ export default function FleetLayer({
         const meta = FACTION_META[s.faction];
         const isMine = unlockedShips.some((u) => u.id === s.id);
         const label = s.category ? `${s.name} (${s.category})` : s.name;
+        const busy = isActionActive(s, now);
         let status = s.dest_planet ? `${label} — en route vers ${s.dest_planet}` : `${label} — à quai`;
         if (pos.stuck) status = `${label} — flotte ennemie en vue !`;
+        else if (busy) status = `${label} — ${ACTION_LABEL[s.action_type ?? "influence"]}`;
         else if (s.damaged) status += " (endommagé)";
         return (
           <div
@@ -31,6 +34,7 @@ export default function FleetLayer({
               pos.traveling ? styles.traveling : "",
               isMine ? styles.mine : "",
               pos.stuck ? styles.stuck : "",
+              busy ? styles.busy : "",
               s.damaged ? styles.damaged : "",
             ].join(" ")}
             style={{

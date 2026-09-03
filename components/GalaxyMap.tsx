@@ -6,6 +6,7 @@ import SessionWidget from "./SessionWidget";
 import FleetLayer from "./FleetLayer";
 import {
   currentPosition,
+  isActionActive,
   type PublicShip,
   type UnlockedFleet,
   type UnlockedShip,
@@ -19,7 +20,8 @@ import {
   type Faction,
   type Planet,
 } from "@/lib/planets";
-import { ROUTE_EDGES } from "@/lib/routes";
+import { ROUTE_EDGES, nearestPlanet } from "@/lib/routes";
+import { availablePlanetAction, ACTION_LABEL, type PlanetAction } from "@/lib/planet-actions";
 
 const UNLOCKED_FLEETS_KEY = "atlas_unlocked_fleets";
 const UNLOCKED_SHIPS_KEY = "atlas_unlocked_ships";
@@ -32,6 +34,14 @@ function mulberry32(seed: number) {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+function minutesLeft(untilIso: string, now: number) {
+  const ms = new Date(untilIso).getTime() - now;
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}min ${s}s`;
 }
 
 function normalize(s: string) {
@@ -275,6 +285,54 @@ export default function GalaxyMap() {
     const id = setTimeout(() => setFleetNotice(null), 4000);
     return () => clearTimeout(id);
   }, [fleetNotice]);
+
+  const [triggeringAction, setTriggeringAction] = useState<string | null>(null);
+
+  // pour un vaisseau contrôlé, à l'arrêt : planète actuelle + action
+  // disponible (aide humanitaire sur un monde neutre, propagation
+  // d'influence sur un monde ennemi) — null si en trajet, occupé, ou
+  // sur un monde qui n'offre aucune action volontaire
+  function idlePlanetAction(unlocked: UnlockedShip) {
+    const live = ships.find((s) => s.id === unlocked.id);
+    if (!live) return null;
+    const pos = currentPosition(live, now);
+    if (pos.traveling) return null;
+    if (isActionActive(live, now)) return null;
+    if (live.encounter_pending) return null;
+    const planet = nearestPlanet(pos.x, pos.y);
+    const action = availablePlanetAction(planet.faction, unlocked.faction);
+    return action ? { planet, action } : null;
+  }
+
+  async function triggerAction(shipId: string, type: PlanetAction) {
+    const unlocked = unlockedShips.find((u) => u.id === shipId);
+    if (!unlocked) return;
+    setTriggeringAction(shipId);
+    try {
+      const res = await fetch(`/api/ships/${shipId}/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: unlocked.code, type }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFleetNotice(data.error ?? "échec de l'action");
+        return;
+      }
+      if (data.ship) {
+        setShips((prev) => prev.map((s) => (s.id === shipId ? { ...s, ...data.ship } : s)));
+      }
+      const msg =
+        type === "humanitarian"
+          ? `${unlocked.name} apporte une aide humanitaire à ${data.planet}.`
+          : `${unlocked.name} propage l'influence sur ${data.planet} (15 min, immobilisé).`;
+      setFleetNotice(msg);
+    } catch {
+      setFleetNotice("erreur réseau");
+    } finally {
+      setTriggeringAction(null);
+    }
+  }
 
   const routes = useMemo(() => {
     const byName = new Map(PLANETS.map((p) => [p.name, p]));
@@ -627,13 +685,28 @@ export default function GalaxyMap() {
                     {unlockedShips.map((u) => {
                       const live = ships.find((s) => s.id === u.id);
                       const pos = live ? currentPosition(live, now) : null;
+                      const busyUntil = live && isActionActive(live, now) ? live.action_ends_at : null;
+                      const available = !pos?.traveling && !busyUntil ? idlePlanetAction(u) : null;
                       return (
                         <div key={u.id} className={styles.fleetRow}>
                           <span className={styles.fleetName}>{u.name}</span>
                           <span className={styles.fleetStatus}>
-                            {live?.dest_planet ? `→ ${live.dest_planet}` : "à quai"}
+                            {busyUntil
+                              ? `${ACTION_LABEL[live!.action_type as "influence" | "seized"]} (${minutesLeft(busyUntil, now)})`
+                              : live?.dest_planet
+                                ? `→ ${live.dest_planet}`
+                                : "à quai"}
                             {pos?.traveling ? " (en transit)" : ""}
                           </span>
+                          {available && (
+                            <button
+                              className={styles.fleetActionBtn}
+                              disabled={triggeringAction === u.id}
+                              onClick={() => triggerAction(u.id, available.action)}
+                            >
+                              {ACTION_LABEL[available.action]}
+                            </button>
+                          )}
                           <button className={styles.fleetForget} onClick={() => forgetShip(u.id)}>
                             oublier
                           </button>

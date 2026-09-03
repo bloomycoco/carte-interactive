@@ -24,6 +24,9 @@ type ShipRow = {
   arrival_at: string | null;
   damaged: boolean;
   encounter_pending: boolean;
+  action_type: "influence" | "seized" | null;
+  action_started_at: string | null;
+  action_ends_at: string | null;
 };
 
 type FleetRow = {
@@ -463,6 +466,12 @@ export default function AdminDashboard({ role }: { role: Role }) {
                       {f.ships.map((s) => {
                         const traveling = !!s.dest_planet;
                         const eta = traveling ? etaLabel(s.arrival_at) : null;
+                        const busy =
+                          !!s.action_started_at &&
+                          !!s.action_ends_at &&
+                          new Date(s.action_started_at).getTime() <= Date.now() &&
+                          new Date(s.action_ends_at).getTime() > Date.now();
+                        const actionEta = busy ? etaLabel(s.action_ends_at) : null;
                         return (
                           <tr key={s.id}>
                             <td>{s.name}</td>
@@ -487,10 +496,18 @@ export default function AdminDashboard({ role }: { role: Role }) {
                             <td className={styles.status}>
                               {s.encounter_pending ? (
                                 <span className={styles.encounterTag}>⚠ rencontre en cours</span>
+                              ) : busy ? (
+                                <span className={styles.encounterTag}>
+                                  {s.action_type === "seized" ? "🔒 saisi par le Cartel" : "🤝 propage l'influence"}
+                                  {actionEta && <span className={styles.eta}> ({actionEta})</span>}
+                                </span>
                               ) : traveling ? (
                                 <>
                                   en transit → {s.dest_planet}
                                   {eta && <span className={styles.eta}> ({eta})</span>}
+                                  {s.action_type === "seized" && (
+                                    <span className={styles.damagedTag}> · ⏳ saisie programmée à l&apos;arrivée</span>
+                                  )}
                                 </>
                               ) : (
                                 "à quai"

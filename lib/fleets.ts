@@ -60,6 +60,14 @@ export function rollCombatWin(winChancePercent: number) {
   return randomFraction() * 100 < winChancePercent;
 }
 
+// Risque de saisie du vaisseau par le Cartel à l'arrivée sur un de ses
+// mondes — 50/50, aucune action du joueur ne peut l'éviter.
+const CARTEL_SEIZURE_CHANCE = 0.5;
+
+export function rollCartelSeizure() {
+  return randomFraction() < CARTEL_SEIZURE_CHANCE;
+}
+
 // Position d'un vaisseau au moment précis d'une rencontre programmée
 // (réutilise l'interpolation le long du chemin).
 export function positionAt(

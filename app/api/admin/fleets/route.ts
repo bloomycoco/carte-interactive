@@ -41,11 +41,15 @@ export async function GET() {
     arrival_at: string | null;
     damaged: boolean;
     encounter_pending: boolean;
+    action_type: string | null;
+    action_started_at: string | null;
+    action_ends_at: string | null;
     created_at: string;
     updated_at: string;
   }>`
     select id, fleet_id, name, category, code, x, y, dest_x, dest_y, dest_planet,
-           departed_at, arrival_at, damaged, encounter_pending, created_at, updated_at
+           departed_at, arrival_at, damaged, encounter_pending, action_type, action_started_at,
+           action_ends_at, created_at, updated_at
     from ships
     order by created_at asc
   `;

@@ -38,9 +38,12 @@ export async function POST(request: Request) {
     damaged: boolean;
     encounter_pending: boolean;
     encounter_at: string | null;
+    action_type: string | null;
+    action_started_at: string | null;
+    action_ends_at: string | null;
   }>`
     select id, name, category, x, y, dest_x, dest_y, dest_planet, departed_at, arrival_at, path,
-           damaged, encounter_pending, encounter_at
+           damaged, encounter_pending, encounter_at, action_type, action_started_at, action_ends_at
     from ships
     where fleet_id = ${fleet.id}::uuid
     order by created_at asc

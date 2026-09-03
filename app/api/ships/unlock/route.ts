@@ -12,7 +12,8 @@ export async function POST(request: Request) {
   const rows = await db.sql`
     select s.id, s.name, s.category, f.faction, f.name as fleet_name,
            s.x, s.y, s.dest_x, s.dest_y, s.dest_planet, s.departed_at, s.arrival_at, s.path,
-           s.damaged, s.encounter_pending, s.encounter_at, s.encounter_win_chance
+           s.damaged, s.encounter_pending, s.encounter_at, s.encounter_win_chance,
+           s.action_type, s.action_started_at, s.action_ends_at
     from ships s
     join fleets f on f.id = s.fleet_id
     where s.code = ${code}

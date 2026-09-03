@@ -31,7 +31,24 @@ export type ShipTravelState = {
   encounter_pending?: boolean;
   encounter_at?: string | null;
   encounter_win_chance?: number | null;
+  // action en cours à la surface d'une planète (propagation d'influence
+  // ou saisie par le Cartel) : le vaisseau est immobilisé entre
+  // action_started_at et action_ends_at (une saisie est programmée dès
+  // le départ mais ne commence qu'à l'arrivée).
+  action_type?: "influence" | "seized" | null;
+  action_started_at?: string | null;
+  action_ends_at?: string | null;
 };
+
+// Vrai si une action de surface (influence/saisie) est active MAINTENANT
+// — pas simplement programmée pour plus tard (cas d'une saisie promise
+// à l'arrivée, tant que le vaisseau n'y est pas encore).
+export function isActionActive(s: ShipTravelState, now = Date.now()) {
+  if (!s.action_started_at || !s.action_ends_at) return false;
+  const start = new Date(s.action_started_at).getTime();
+  const end = new Date(s.action_ends_at).getTime();
+  return start <= now && now < end;
+}
 
 // Un vaisseau tel que renseigné sur la carte publique — pas de code ici,
 // ni de flotte (le rattachement n'a d'intérêt que côté admin/déverrouillage).
