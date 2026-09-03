@@ -170,6 +170,34 @@ export function currentPosition(s: ShipTravelState, now = Date.now()) {
   return { x: last.x, y: last.y, traveling: true as const, stuck };
 }
 
+// Prochaine étape (planète) vers laquelle un vaisseau EN TRAJET se dirige
+// actuellement — pas sa destination finale, mais le bout du segment en
+// cours. Sert à rediriger un vaisseau en plein vol sans jamais lui faire
+// couper à travers l'espace : il continue d'abord jusque-là avant
+// d'enchaîner vers sa nouvelle destination. Null s'il n'est pas en trajet.
+export function nextWaypoint(s: ShipTravelState, now = Date.now()): Waypoint | null {
+  if (s.dest_x == null || s.dest_y == null || !s.departed_at || !s.arrival_at) return null;
+  const pos = currentPosition(s, now);
+  if (!pos.traveling) return null;
+
+  const start = new Date(s.departed_at).getTime();
+  const end = new Date(s.arrival_at).getTime();
+  const t = Math.max(0, (now - start) / Math.max(1, end - start));
+  const points: Waypoint[] =
+    s.path && s.path.length >= 2 ? s.path : [{ x: s.x, y: s.y }, { x: s.dest_x, y: s.dest_y }];
+
+  const total = pathLength(points);
+  if (total === 0) return points[points.length - 1];
+
+  let target = total * t;
+  for (let i = 1; i < points.length; i++) {
+    const segLen = Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+    if (target <= segLen || i === points.length - 1) return points[i];
+    target -= segLen;
+  }
+  return points[points.length - 1];
+}
+
 // Planifie un trajet le long d'un chemin (liste de points, départ réel
 // inclus) : la durée dépend de la longueur RÉELLE du chemin, pas de la
 // distance à vol d'oiseau — plus c'est loin par les routes, plus c'est long.
