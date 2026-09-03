@@ -684,6 +684,17 @@ export default function GalaxyMap() {
     ? (ships.find((s) => s.id === selectedShipId && !s.is_npc) ?? null)
     : null;
 
+  // tous les vaisseaux actuellement à quai sur la planète affichée dans
+  // le panneau (n'importe quel camp, NPC compris) — simple liste
+  // informative de ce qui s'y trouve en ce moment
+  const shipsAtSelectedPlanet = selected
+    ? ships.filter((s) => {
+        const pos = currentPosition(s, now);
+        if (pos.traveling) return false;
+        return nearestPlanet(pos.x, pos.y).name === selected.name;
+      })
+    : [];
+
   // vaisseaux contrôlés, à l'arrêt sur la planète actuellement affichée
   // dans le panneau, avec une action disponible ici (aide humanitaire /
   // attaquer la planète)
@@ -1171,6 +1182,23 @@ export default function GalaxyMap() {
                     style={{ width: `${planetInfluence[selected.name] ?? 0}%` }}
                   />
                 </div>
+              </div>
+            )}
+            {shipsAtSelectedPlanet.length > 0 && (
+              <div className={styles.planetShips}>
+                <div className={styles.planetShipsLabel}>
+                  Vaisseaux présents ({shipsAtSelectedPlanet.length})
+                </div>
+                {shipsAtSelectedPlanet.map((s) => (
+                  <div key={s.id} className={styles.planetShipRow}>
+                    <span
+                      className={styles.swatch}
+                      style={{ background: FACTION_META[s.faction].color }}
+                    />
+                    <span className={styles.planetShipName}>{s.name}</span>
+                    <span className={styles.planetShipType}>{s.category ?? "—"}</span>
+                  </div>
+                ))}
               </div>
             )}
             <div className={styles.panelActions}>
