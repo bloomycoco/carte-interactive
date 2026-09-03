@@ -1238,14 +1238,8 @@ export default function GalaxyMap() {
             <div className={styles.system}>{selectedShip.category ?? "Type inconnu"}</div>
             <div className={styles.coords}>
               <div>
-                DESTINATION{" "}
-                <b>
-                  {selectedShip.dest_planet
-                    ? selectedShip.dest_planet
-                    : currentPosition(selectedShip, now).traveling
-                      ? "—"
-                      : "à quai"}
-                </b>
+                DERNIÈRE PLANÈTE{" "}
+                <b>{nearestPlanet(selectedShip.x, selectedShip.y).name}</b>
               </div>
               {selectedShip.damaged && (
                 <div>
@@ -1267,14 +1261,8 @@ export default function GalaxyMap() {
             <div className={styles.system}>{selectedNpc.category ?? "Type inconnu"}</div>
             <div className={styles.coords}>
               <div>
-                DESTINATION{" "}
-                <b>
-                  {selectedNpc.dest_planet
-                    ? selectedNpc.dest_planet
-                    : currentPosition(selectedNpc, now).traveling
-                      ? "—"
-                      : "à quai"}
-                </b>
+                DERNIÈRE PLANÈTE{" "}
+                <b>{nearestPlanet(selectedNpc.x, selectedNpc.y).name}</b>
               </div>
             </div>
             <div className={styles.panelActions}>
