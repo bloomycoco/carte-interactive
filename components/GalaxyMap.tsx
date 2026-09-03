@@ -368,7 +368,7 @@ export default function GalaxyMap() {
 
   // pour un vaisseau contrôlé, à l'arrêt : planète actuelle + action
   // disponible (aide humanitaire sur un monde neutre — ou une étape de
-  // sa quête en cours —, propagation d'influence sur un monde ennemi) —
+  // sa quête en cours —, attaquer la planète sur un monde ennemi) —
   // null si en trajet, occupé, ou sur un monde qui n'offre aucune action
   function idlePlanetAction(unlocked: UnlockedShip) {
     const live = ships.find((s) => s.id === unlocked.id);
@@ -383,20 +383,7 @@ export default function GalaxyMap() {
         ? { originPlanet: live.quest_origin_planet, targetPlanet: live.quest_target_planet, phase: live.quest_phase }
         : null;
     const action = availablePlanetAction(planet.name, planet.faction, unlocked.faction, quest);
-    if (!action) return null;
-    // un seul vaisseau à la fois peut répandre l'influence sur une même
-    // planète — masque le bouton si un autre s'en charge déjà
-    if (action === "influence") {
-      const alreadyInfluencing = ships.some(
-        (s) =>
-          s.id !== live.id &&
-          s.dest_planet === planet.name &&
-          s.action_type === "influence" &&
-          isActionActive(s, now),
-      );
-      if (alreadyInfluencing) return null;
-    }
-    return { planet, action };
+    return action ? { planet, action } : null;
   }
 
   async function triggerAction(shipId: string, type: PlanetAction) {
@@ -424,7 +411,9 @@ export default function GalaxyMap() {
             ? `${unlocked.name} récupère les vivres et repart vers ${data.origin}.`
             : type === "humanitarian_deliver"
               ? `${unlocked.name} livre l'aide humanitaire à ${data.planet}. Mission accomplie !`
-              : `${unlocked.name} propage l'influence sur ${data.planet} (15 min, immobilisé).`;
+              : data.outcome === "won"
+                ? `${unlocked.name} remporte l'attaque sur ${data.planet} ! La flotte gagne en puissance.`
+                : `${unlocked.name} échoue son attaque sur ${data.planet}. L'ennemi en ressort renforcé.`;
       setFleetNotice(msg);
     } catch {
       setFleetNotice("erreur réseau");
@@ -619,7 +608,7 @@ export default function GalaxyMap() {
 
   // vaisseaux contrôlés, à l'arrêt sur la planète actuellement affichée
   // dans le panneau, avec une action disponible ici (aide humanitaire /
-  // propager l'influence)
+  // attaquer la planète)
   const planetShipActions = selected
     ? unlockedShips
         .map((u) => {
@@ -804,7 +793,7 @@ export default function GalaxyMap() {
                           <span className={styles.fleetName}>{u.name}</span>
                           <span className={styles.fleetStatus}>
                             {busyUntil
-                              ? `${ACTION_LABEL[live!.action_type as "influence" | "seized"]} (${minutesLeft(busyUntil, now)})`
+                              ? `${ACTION_LABEL[live!.action_type as "seized"]} (${minutesLeft(busyUntil, now)})`
                               : live?.dest_planet
                                 ? `→ ${live.dest_planet}`
                                 : "à quai"}

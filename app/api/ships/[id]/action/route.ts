@@ -4,10 +4,13 @@ import {
   currentPosition,
   pickHumanitarianQuestTarget,
   planTravelAlongPath,
+  rollCombatWin,
+  rollEncounterOdds,
   type Waypoint,
 } from "@/lib/fleets";
 import { nearestPlanet, shortestPath } from "@/lib/routes";
-import { availablePlanetAction, INFLUENCE_DURATION_SECONDS, type HumanitarianQuest } from "@/lib/planet-actions";
+import { availablePlanetAction, type HumanitarianQuest } from "@/lib/planet-actions";
+import { fleetStrength } from "@/lib/ship-classes";
 
 // Déclenche une action volontaire à la surface de la planète où le
 // vaisseau est actuellement arrêté :
@@ -15,8 +18,9 @@ import { availablePlanetAction, INFLUENCE_DURATION_SECONDS, type HumanitarianQue
 //   départ vers une planète tirée au sort (toujours lointaine),
 //   récupération des vivres sur place, puis retour les livrer sur le
 //   monde d'origine ;
-// - propagation d'influence (monde d'un clan ennemi, immobilise le
-//   vaisseau 15 min).
+// - attaquer la planète (monde d'un clan ennemi) : résolu immédiatement
+//   avec 1 vaisseau — une victoire renforce la flotte (kills, comme un
+//   combat gagné), un échec renforce TOUTES les flottes NPC de ce clan.
 // Accessible avec le code DU VAISSEAU.
 export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/action">) {
   const { id } = await ctx.params;
@@ -29,7 +33,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
     type !== "humanitarian" &&
     type !== "humanitarian_pickup" &&
     type !== "humanitarian_deliver" &&
-    type !== "influence"
+    type !== "attack"
   ) {
     return NextResponse.json({ error: "action invalide" }, { status: 400 });
   }
@@ -37,6 +41,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
   const db = getDatabase();
   const rows = await db.sql<{
     id: string;
+    fleet_id: string;
     code: string;
     faction: string;
     x: number;
@@ -54,7 +59,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
     quest_target_planet: string | null;
     quest_phase: "fetching" | "returning" | null;
   }>`
-    select s.id, s.code, f.faction, s.x, s.y, s.dest_x, s.dest_y, s.departed_at, s.arrival_at, s.path,
+    select s.id, s.fleet_id, s.code, f.faction, s.x, s.y, s.dest_x, s.dest_y, s.departed_at, s.arrival_at, s.path,
            s.damaged, s.encounter_pending, s.action_ends_at,
            s.quest_type, s.quest_origin_planet, s.quest_target_planet, s.quest_phase
     from ships s
@@ -166,32 +171,29 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
     return NextResponse.json({ ok: true, type, planet: planet.name, ship: updated[0] });
   }
 
-  // propagation d'influence : immobilise le vaisseau 15 minutes — un seul
-  // vaisseau à la fois peut répandre l'influence sur une même planète
-  const [concurrent] = await db.sql<{ id: string }>`
-    select id from ships
-    where action_type = 'influence' and action_started_at <= now() and action_ends_at > now()
-      and dest_planet = ${planet.name} and id != ${id}::uuid
-    limit 1
+  // attaquer la planète : résolu immédiatement avec ce seul vaisseau —
+  // les chances de victoire dépendent de la force de sa flotte, comme
+  // pour une rencontre normale.
+  const fleetShips = await db.sql<{ category: string | null }>`
+    select category from ships where fleet_id = ${ship.fleet_id}::uuid
   `;
-  if (concurrent) {
-    return NextResponse.json(
-      { error: `un autre vaisseau répand déjà l'influence sur ${planet.name}` },
-      { status: 400 },
-    );
+  const [fleetRow] = await db.sql<{ kills: number; losses: number }>`
+    select kills, losses from fleets where id = ${ship.fleet_id}::uuid
+  `;
+  const strength = fleetStrength(fleetShips, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0);
+  const winChance = rollEncounterOdds(strength);
+  const won = rollCombatWin(winChance);
+
+  if (won) {
+    await db.sql`update fleets set kills = kills + 1, updated_at = now() where id = ${ship.fleet_id}::uuid`;
+  } else {
+    // l'attaque échoue : tout le clan visé (pas juste une flotte) en
+    // ressort plus fort
+    await db.sql`
+      update fleets set kills = kills + 1, updated_at = now()
+      where is_npc = true and faction = ${planet.faction}
+    `;
   }
 
-  const startedAt = new Date();
-  const endsAt = new Date(startedAt.getTime() + INFLUENCE_DURATION_SECONDS * 1000);
-
-  const updated = await db.sql`
-    update ships
-    set action_type = 'influence', action_started_at = ${startedAt.toISOString()},
-        action_ends_at = ${endsAt.toISOString()}, updated_at = now()
-    where id = ${id}::uuid
-    returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,
-              damaged, encounter_pending, encounter_at, action_type, action_started_at, action_ends_at
-  `;
-
-  return NextResponse.json({ ok: true, type, planet: planet.name, ship: updated[0] });
+  return NextResponse.json({ ok: true, type, planet: planet.name, outcome: won ? "won" : "lost", winChance });
 }

@@ -108,10 +108,16 @@ export function pickHumanitarianQuestTarget(origin: Planet): Planet {
 }
 
 // Camps NPC (jamais joueur) et nombre de flottes que chacun doit toujours
-// avoir sur la carte — une flotte détruite au combat réapparaît après
-// NPC_RESPAWN_SECONDS plutôt que de disparaître pour de bon.
+// avoir sur la carte, patrouillant leur propre territoire — une flotte
+// détruite au combat réapparaît après NPC_RESPAWN_SECONDS plutôt que de
+// disparaître pour de bon. Le CSI en a plus : c'est la seule cible des
+// attaques de planète.
 export const NPC_FACTIONS: ("csi" | "mandalore" | "cartel")[] = ["csi", "mandalore", "cartel"];
-export const NPC_FLEET_TARGET_COUNT = 3;
+export const NPC_FLEET_TARGET_COUNT: Record<"csi" | "mandalore" | "cartel", number> = {
+  csi: 6,
+  mandalore: 3,
+  cartel: 3,
+};
 export const NPC_RESPAWN_SECONDS = 5 * 60;
 
 const NPC_FLEET_NAME_POOL: Record<"csi" | "mandalore" | "cartel", string[]> = {
@@ -270,19 +276,4 @@ export function pickNpcRoute(
   const destination = PLANETS.find((p) => p.name === destName);
   if (!destination) return null;
   return { destination, path };
-}
-
-// Comme pickNpcRoute, mais vers une destination précise plutôt que
-// tirée au sort — sans jamais quitter le territoire du clan. Utilisé
-// quand un camp NPC doit converger vers un endroit précis (le CSI qui
-// rapplique là où la République répand son influence sur un de ses
-// mondes) plutôt que se balader au hasard.
-export function planNpcRouteTo(
-  faction: Faction,
-  currentPlanetName: string,
-  destinationName: string,
-): Planet[] | null {
-  const allowed = new Set(PLANETS.filter((p) => p.faction === faction).map((p) => p.name));
-  if (!allowed.has(destinationName)) return null;
-  return shortestPath(currentPlanetName, destinationName, allowed);
 }

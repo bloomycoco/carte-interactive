@@ -45,7 +45,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
     damaged: boolean;
     encounter_pending: boolean;
     encounter_at: string | null;
-    action_type: "influence" | "seized" | null;
+    action_type: "seized" | null;
     action_started_at: string | null;
     action_ends_at: string | null;
   }>`

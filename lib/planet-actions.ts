@@ -6,14 +6,13 @@ import type { Faction as ShipFaction } from "./fleet-motion";
 // - monde neutre -> aide humanitaire : déclenche une quête (aller
 //   chercher des vivres sur une planète tirée au sort, toujours
 //   lointaine, puis les ramener) — voir HumanitarianQuest ci-dessous
-// - monde d'un clan ennemi -> propagation d'influence, déclenchée par le
-//   joueur, immobilise le vaisseau 15 min
+// - monde d'un clan ennemi -> attaquer la planète : résolu
+//   immédiatement (pas d'immobilisation), voir POST /api/ships/[id]/action
 // - monde du Cartel -> pas d'action volontaire, mais 50% de risque d'être
 //   saisi par le Cartel à l'arrivée (immobilisé 20 min) — voir
 //   ROLL_SEIZURE_CHANCE côté serveur (lib/fleets.ts)
-export type PlanetAction = "humanitarian" | "influence" | "humanitarian_pickup" | "humanitarian_deliver";
+export type PlanetAction = "humanitarian" | "attack" | "humanitarian_pickup" | "humanitarian_deliver";
 
-export const INFLUENCE_DURATION_SECONDS = 15 * 60;
 export const SEIZURE_DURATION_SECONDS = 20 * 60;
 
 // État de la quête d'aide humanitaire en cours pour un vaisseau, tel que
@@ -39,7 +38,7 @@ export function availablePlanetAction(
   if (planetFaction === "neutre") return "humanitarian";
   if (planetFaction === "cartel") return null;
   if (planetFaction === "republique" || planetFaction === "csi" || planetFaction === "mandalore") {
-    return planetFaction !== shipFaction ? "influence" : null;
+    return planetFaction !== shipFaction ? "attack" : null;
   }
   return null;
 }
@@ -48,6 +47,6 @@ export const ACTION_LABEL: Record<PlanetAction | "seized", string> = {
   humanitarian: "Aide humanitaire",
   humanitarian_pickup: "Récupérer les vivres",
   humanitarian_deliver: "Livrer l'aide humanitaire",
-  influence: "Répandre l'influence",
+  attack: "Attaquer la planète",
   seized: "Saisi par le Cartel",
 };

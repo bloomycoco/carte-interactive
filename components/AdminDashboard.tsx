@@ -25,7 +25,7 @@ type ShipRow = {
   arrival_at: string | null;
   damaged: boolean;
   encounter_pending: boolean;
-  action_type: "influence" | "seized" | null;
+  action_type: "seized" | null;
   action_started_at: string | null;
   action_ends_at: string | null;
 };
@@ -611,7 +611,7 @@ export default function AdminDashboard({ role }: { role: Role }) {
                                 <span className={styles.encounterTag}>⚠ rencontre en cours</span>
                               ) : busy ? (
                                 <span className={styles.encounterTag}>
-                                  {s.action_type === "seized" ? "🔒 saisi par le Cartel" : "🤝 propage l'influence"}
+                                  🔒 saisi par le Cartel
                                   {actionEta && <span className={styles.eta}> ({actionEta})</span>}
                                 </span>
                               ) : traveling ? (

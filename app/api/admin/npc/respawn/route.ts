@@ -42,7 +42,7 @@ export async function POST() {
     const [{ count }] = await db.sql<{ count: string }>`
       select count(*)::text as count from fleets where is_npc = true and faction = ${faction}
     `;
-    const missing = NPC_FLEET_TARGET_COUNT - Number(count);
+    const missing = NPC_FLEET_TARGET_COUNT[faction] - Number(count);
     for (let i = 0; i < missing; i++) {
       const { name, category } = pickNpcFleetFlavor(faction);
       const [newFleet] = await db.sql<{ id: string }>`

@@ -34,11 +34,12 @@ export type ShipTravelState = {
   // clan de la flotte NPC croisée, pour l'affichage ("vous croisez une
   // flotte du Cartel !")
   encounter_enemy_faction?: Faction | null;
-  // action en cours à la surface d'une planète (propagation d'influence
-  // ou saisie par le Cartel) : le vaisseau est immobilisé entre
-  // action_started_at et action_ends_at (une saisie est programmée dès
-  // le départ mais ne commence qu'à l'arrivée).
-  action_type?: "influence" | "seized" | null;
+  // action en cours à la surface d'une planète (saisie par le Cartel) :
+  // le vaisseau est immobilisé entre action_started_at et action_ends_at
+  // (une saisie est programmée dès le départ mais ne commence qu'à
+  // l'arrivée). Attaquer une planète, en comparaison, se résout
+  // immédiatement — pas d'immobilisation, donc pas besoin de ces champs.
+  action_type?: "seized" | null;
   action_started_at?: string | null;
   action_ends_at?: string | null;
   // quête d'aide humanitaire en cours (monde neutre) : le vaisseau va
@@ -52,9 +53,9 @@ export type ShipTravelState = {
   quest_phase?: "fetching" | "returning" | null;
 };
 
-// Vrai si une action de surface (influence/saisie) est active MAINTENANT
-// — pas simplement programmée pour plus tard (cas d'une saisie promise
-// à l'arrivée, tant que le vaisseau n'y est pas encore).
+// Vrai si une action de surface (saisie) est active MAINTENANT — pas
+// simplement programmée pour plus tard (cas d'une saisie promise à
+// l'arrivée, tant que le vaisseau n'y est pas encore).
 export function isActionActive(s: ShipTravelState, now = Date.now()) {
   if (!s.action_started_at || !s.action_ends_at) return false;
   const start = new Date(s.action_started_at).getTime();
@@ -168,34 +169,6 @@ export function currentPosition(s: ShipTravelState, now = Date.now()) {
   }
   const last = points[points.length - 1];
   return { x: last.x, y: last.y, traveling: true as const, stuck };
-}
-
-// Prochaine étape (planète) vers laquelle un vaisseau EN TRAJET se dirige
-// actuellement — pas sa destination finale, mais le bout du segment en
-// cours. Sert à rediriger un vaisseau en plein vol sans jamais lui faire
-// couper à travers l'espace : il continue d'abord jusque-là avant
-// d'enchaîner vers sa nouvelle destination. Null s'il n'est pas en trajet.
-export function nextWaypoint(s: ShipTravelState, now = Date.now()): Waypoint | null {
-  if (s.dest_x == null || s.dest_y == null || !s.departed_at || !s.arrival_at) return null;
-  const pos = currentPosition(s, now);
-  if (!pos.traveling) return null;
-
-  const start = new Date(s.departed_at).getTime();
-  const end = new Date(s.arrival_at).getTime();
-  const t = Math.max(0, (now - start) / Math.max(1, end - start));
-  const points: Waypoint[] =
-    s.path && s.path.length >= 2 ? s.path : [{ x: s.x, y: s.y }, { x: s.dest_x, y: s.dest_y }];
-
-  const total = pathLength(points);
-  if (total === 0) return points[points.length - 1];
-
-  let target = total * t;
-  for (let i = 1; i < points.length; i++) {
-    const segLen = Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
-    if (target <= segLen || i === points.length - 1) return points[i];
-    target -= segLen;
-  }
-  return points[points.length - 1];
 }
 
 // Planifie un trajet le long d'un chemin (liste de points, départ réel
