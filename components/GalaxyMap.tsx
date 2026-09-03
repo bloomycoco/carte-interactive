@@ -8,6 +8,7 @@ import {
   currentPosition,
   isActionActive,
   type PublicShip,
+  type UnlockedCaptainFleet,
   type UnlockedFleet,
   type UnlockedShip,
 } from "@/lib/fleet-motion";
@@ -25,6 +26,7 @@ import { availablePlanetAction, ACTION_LABEL, type PlanetAction } from "@/lib/pl
 
 const UNLOCKED_FLEETS_KEY = "atlas_unlocked_fleets";
 const UNLOCKED_SHIPS_KEY = "atlas_unlocked_ships";
+const UNLOCKED_CAPTAINS_KEY = "atlas_unlocked_captains";
 
 function mulberry32(seed: number) {
   return function () {
@@ -82,6 +84,15 @@ export default function GalaxyMap() {
       return [];
     }
   });
+  const [unlockedCaptains, setUnlockedCaptains] = useState<UnlockedCaptainFleet[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = localStorage.getItem(UNLOCKED_CAPTAINS_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
   const [fleetsOpen, setFleetsOpen] = useState(false);
   const [unlockCode, setUnlockCode] = useState("");
   const [unlockError, setUnlockError] = useState<string | null>(null);
@@ -105,6 +116,15 @@ export default function GalaxyMap() {
     setUnlockedShips(list);
     try {
       localStorage.setItem(UNLOCKED_SHIPS_KEY, JSON.stringify(list));
+    } catch {
+      // stockage indisponible : la session en mémoire suffit
+    }
+  }
+
+  function persistUnlockedCaptains(list: UnlockedCaptainFleet[]) {
+    setUnlockedCaptains(list);
+    try {
+      localStorage.setItem(UNLOCKED_CAPTAINS_KEY, JSON.stringify(list));
     } catch {
       // stockage indisponible : la session en mémoire suffit
     }
@@ -141,8 +161,9 @@ export default function GalaxyMap() {
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  // un code peut être celui d'une flotte (accès en lecture à ses vaisseaux)
-  // ou celui d'un vaisseau (contrôle direct) — on essaie les deux.
+  // un code peut être celui d'une flotte (accès en lecture à ses
+  // vaisseaux), celui d'un Capitaine (ordre groupé pour toute la flotte),
+  // ou celui d'un vaisseau (contrôle direct) — on essaie les trois.
   async function unlockAny(code: string) {
     const trimmed = code.trim().toUpperCase();
     if (!trimmed) return;
@@ -172,6 +193,29 @@ export default function GalaxyMap() {
                 name: s.name,
                 dest_planet: s.dest_planet,
               })),
+            },
+          ]);
+        }
+        setUnlockCode("");
+        return;
+      }
+
+      const captainRes = await fetch("/api/fleets/captain-unlock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: trimmed }),
+      });
+      if (captainRes.ok) {
+        const data = await captainRes.json();
+        if (!unlockedCaptains.some((u) => u.id === data.fleet.id)) {
+          persistUnlockedCaptains([
+            ...unlockedCaptains,
+            {
+              id: data.fleet.id,
+              code: trimmed,
+              name: data.fleet.name,
+              faction: data.fleet.faction,
+              strength: data.fleet.strength,
             },
           ]);
         }
@@ -216,6 +260,10 @@ export default function GalaxyMap() {
     persistUnlockedShips(unlockedShips.filter((u) => u.id !== id));
   }
 
+  function forgetCaptain(id: string) {
+    persistUnlockedCaptains(unlockedCaptains.filter((u) => u.id !== id));
+  }
+
   async function sendShipTo(shipId: string, planet: Planet) {
     const unlocked = unlockedShips.find((u) => u.id === shipId);
     if (!unlocked) return;
@@ -232,6 +280,34 @@ export default function GalaxyMap() {
       }
       setShips((prev) => prev.map((s) => (s.id === shipId ? { ...s, ...data.ship } : s)));
       setFleetNotice(`${unlocked.name} en route vers ${planet.name}`);
+      setSendChooserFor(null);
+    } catch {
+      setFleetNotice("erreur réseau");
+    }
+  }
+
+  async function sendFleetTo(fleetId: string, planet: Planet) {
+    const unlocked = unlockedCaptains.find((u) => u.id === fleetId);
+    if (!unlocked) return;
+    try {
+      const res = await fetch(`/api/fleets/${fleetId}/order`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: unlocked.code, destPlanet: planet.name }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFleetNotice(data.error ?? "échec de l'ordre");
+        return;
+      }
+      const ordered = (
+        data.results as { id: string; status: "ordered" | "skipped" }[]
+      ).filter((r) => r.status === "ordered").length;
+      const skipped = data.results.length - ordered;
+      setFleetNotice(
+        `${unlocked.name} : ${ordered} vaisseau(x) en route vers ${planet.name}` +
+          (skipped > 0 ? `, ${skipped} occupé(s) ignoré(s)` : ""),
+      );
       setSendChooserFor(null);
     } catch {
       setFleetNotice("erreur réseau");
@@ -696,8 +772,8 @@ export default function GalaxyMap() {
               onClick={() => setFleetsOpen((v) => !v)}
             >
               Mes Flottes
-              {unlockedFleets.length + unlockedShips.length > 0
-                ? ` (${unlockedFleets.length + unlockedShips.length})`
+              {unlockedFleets.length + unlockedShips.length + unlockedCaptains.length > 0
+                ? ` (${unlockedFleets.length + unlockedShips.length + unlockedCaptains.length})`
                 : ""}
             </button>
             {fleetsOpen && (
@@ -743,6 +819,20 @@ export default function GalaxyMap() {
                     })}
                   </div>
                 )}
+                {unlockedCaptains.length > 0 && (
+                  <div className={styles.fleetsGroup}>
+                    <div className={styles.fleetsGroupLabel}>Flottes (Capitaine)</div>
+                    {unlockedCaptains.map((u) => (
+                      <div key={u.id} className={styles.fleetRow}>
+                        <span className={styles.fleetName}>⭐ {u.name}</span>
+                        <span className={styles.fleetStatus}>⚔ {u.strength}</span>
+                        <button className={styles.fleetForget} onClick={() => forgetCaptain(u.id)}>
+                          oublier
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {unlockedFleets.length > 0 && (
                   <div className={styles.fleetsGroup}>
                     <div className={styles.fleetsGroupLabel}>Flottes (lecture seule)</div>
@@ -759,7 +849,7 @@ export default function GalaxyMap() {
                     ))}
                   </div>
                 )}
-                {unlockedFleets.length === 0 && unlockedShips.length === 0 && (
+                {unlockedFleets.length === 0 && unlockedShips.length === 0 && unlockedCaptains.length === 0 && (
                   <div className={styles.fleetsEmpty}>Rien de déverrouillé pour le moment.</div>
                 )}
                 <form
@@ -881,7 +971,7 @@ export default function GalaxyMap() {
               >
                 Lien ↗
               </a>
-              {unlockedShips.length > 0 ? (
+              {unlockedShips.length > 0 || unlockedCaptains.length > 0 ? (
                 <div className={styles.sendWrap}>
                   <button
                     className={styles.actionBtn}
@@ -893,6 +983,15 @@ export default function GalaxyMap() {
                   </button>
                   {sendChooserFor === selected.name && (
                     <div className={styles.sendChooser}>
+                      {unlockedCaptains.map((u) => (
+                        <button
+                          key={u.id}
+                          className={styles.sendChooserRow}
+                          onClick={() => selected && sendFleetTo(u.id, selected)}
+                        >
+                          ⭐ Toute la flotte : {u.name}
+                        </button>
+                      ))}
                       {unlockedShips.map((u) => (
                         <button
                           key={u.id}
@@ -909,7 +1008,7 @@ export default function GalaxyMap() {
                 <button
                   className={`${styles.actionBtn} ${styles.actionBtnDisabled}`}
                   disabled
-                  title="Déverrouille un vaisseau avec son code (bouton « Mes Flottes ») pour lui donner des ordres"
+                  title="Déverrouille un vaisseau ou un code Capitaine (bouton « Mes Flottes ») pour donner des ordres"
                 >
                   Envoyer Vaisseau
                 </button>

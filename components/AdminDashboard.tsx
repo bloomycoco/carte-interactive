@@ -36,6 +36,7 @@ type FleetRow = {
   faction: Faction;
   is_npc: boolean;
   code: string;
+  captain_code: string | null;
   kills: number;
   losses: number;
   strength: number;
@@ -148,7 +149,7 @@ export default function AdminDashboard({ role }: { role: Role }) {
       );
       setFleets((prev) => (prev ? [...prev, data.fleet] : [data.fleet]));
       setFleetName("");
-      flash(`Flotte "${data.fleet.name}" créée — code ${data.fleet.code}`);
+      flash(`Flotte "${data.fleet.name}" créée — code ${data.fleet.code} · capitaine ${data.fleet.captain_code}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -208,6 +209,23 @@ export default function AdminDashboard({ role }: { role: Role }) {
       );
       setFleets((prev) => prev?.map((f) => (f.id === id ? { ...f, ...data.fleet } : f)) ?? null);
       flash(`Nouveau code de flotte : ${data.fleet.code}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function regenerateCaptainCode(id: string) {
+    setError(null);
+    try {
+      const data = await jsonOrThrow(
+        await fetch(`/api/admin/fleets/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ regenerateCaptainCode: true }),
+        }),
+      );
+      setFleets((prev) => prev?.map((f) => (f.id === id ? { ...f, ...data.fleet } : f)) ?? null);
+      flash(`Nouveau code Capitaine : ${data.fleet.captain_code}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -484,7 +502,14 @@ export default function AdminDashboard({ role }: { role: Role }) {
                     </span>
                   )}
                   <span className={styles.fleetTitle}>{f.name}</span>
-                  <span className={styles.code}>{f.code}</span>
+                  <span className={styles.code} title="Code de flotte (lecture seule)">
+                    {f.code}
+                  </span>
+                  {f.captain_code && (
+                    <span className={styles.code} title="Code Capitaine (envoie toute la flotte d'un coup)">
+                      ⭐ {f.captain_code}
+                    </span>
+                  )}
                   {!f.is_npc && (
                     <span className={styles.kdaTag} title="Force de la flotte (vaisseaux + expérience de combat)">
                       ⚔ {f.strength} · {f.kills}V-{f.losses}D
@@ -498,6 +523,11 @@ export default function AdminDashboard({ role }: { role: Role }) {
                       <button className={styles.smallBtnGhost} onClick={() => regenerateFleetCode(f.id)}>
                         Nouveau code
                       </button>
+                      {f.captain_code && (
+                        <button className={styles.smallBtnGhost} onClick={() => regenerateCaptainCode(f.id)}>
+                          Nouveau code Capitaine
+                        </button>
+                      )}
                       <button className={styles.smallBtnGhost} onClick={() => deleteFleet(f.id)}>
                         Supprimer
                       </button>

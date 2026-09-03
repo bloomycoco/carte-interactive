@@ -1,12 +1,10 @@
 import { getDatabase } from "@/lib/db";
 import { NextResponse } from "next/server";
-import { currentPosition, planTravelAlongPath, rollCartelSeizure, type Waypoint } from "@/lib/fleets";
-import { nearestPlanet, shortestPath } from "@/lib/routes";
+import { currentPosition, planShipOrder, shipOrderBlockReason, type Faction, type Waypoint } from "@/lib/fleets";
+import { nearestPlanet } from "@/lib/routes";
 import { PLANETS } from "@/lib/planets";
-import { SEIZURE_DURATION_SECONDS } from "@/lib/planet-actions";
 
 const CORUSCANT = PLANETS.find((p) => p.name === "Coruscant")!;
-const NAL_HUTTA = PLANETS.find((p) => p.name === "Nal Hutta")!;
 
 // Envoie un vaisseau vers une planète, en suivant le réseau de routes
 // (jamais en ligne droite) — la durée dépend de la distance réelle par
@@ -15,7 +13,8 @@ const NAL_HUTTA = PLANETS.find((p) => p.name === "Nal Hutta")!;
 // risque une saisie du vaisseau : il est alors détourné vers Nal Hutta
 // (capitale du Cartel), peu importe la destination demandée. Accessible
 // à quiconque connaît le code DU VAISSEAU (le code de sa flotte ne
-// suffit pas).
+// suffit pas) — voir POST /api/fleets/[id]/order pour l'ordre groupé au
+// code Capitaine.
 export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/order">) {
   const { id } = await ctx.params;
   const body = await request.json().catch(() => null);
@@ -61,100 +60,30 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
   if (!ship) return NextResponse.json({ error: "vaisseau introuvable" }, { status: 404 });
   if (ship.code !== code) return NextResponse.json({ error: "code incorrect" }, { status: 403 });
 
-  const now = Date.now();
-
-  // une rencontre non résolue bloque tout nouvel ordre tant qu'elle
-  // n'a pas été tranchée (combattre / négocier / fuir)
-  if (ship.encounter_pending && ship.encounter_at && new Date(ship.encounter_at).getTime() <= now) {
-    return NextResponse.json(
-      { error: "une rencontre en cours doit être résolue avant de repartir" },
-      { status: 400 },
-    );
-  }
-
-  // occupé (propagation d'influence ou saisie par le Cartel) : immobilisé
-  // — seulement une fois l'action réellement commencée (une saisie
-  // programmée pour l'arrivée ne bloque rien avant que le vaisseau y soit)
-  if (
-    ship.action_ends_at &&
-    ship.action_started_at &&
-    new Date(ship.action_started_at).getTime() <= now &&
-    new Date(ship.action_ends_at).getTime() > now
-  ) {
-    return NextResponse.json({ error: "le vaisseau est immobilisé pour le moment" }, { status: 400 });
-  }
-
   const origin = currentPosition(ship);
+  const blockReason = shipOrderBlockReason(ship, origin, destination.name);
+  if (blockReason) return NextResponse.json({ error: blockReason }, { status: 400 });
+
   const idleAtCoruscant =
     !origin.traveling && Math.abs(origin.x - CORUSCANT.x) < 1 && Math.abs(origin.y - CORUSCANT.y) < 1;
-
-  // un vaisseau endommagé doit d'abord rallier Coruscant pour réparation
-  if (ship.damaged && !idleAtCoruscant && destination.name !== "Coruscant") {
-    return NextResponse.json(
-      { error: "vaisseau endommagé : il doit d'abord rejoindre Coruscant pour réparation" },
-      { status: 400 },
-    );
-  }
   const repaired = ship.damaged && idleAtCoruscant;
 
   const originPlanet = nearestPlanet(origin.x, origin.y);
-  const routePath = shortestPath(originPlanet.name, destination.name);
-  if (!routePath) {
+  const plan = planShipOrder(origin, originPlanet.name, destination, ship.faction as Faction);
+  if (!plan) {
     return NextResponse.json({ error: "aucune route connue vers cette destination" }, { status: 400 });
-  }
-
-  // évite un point de départ en double quand l'origine coïncide déjà
-  // avec la première planète du chemin (cas le plus courant)
-  const firstHop = routePath[0];
-  const startsAtFirstHop = firstHop.x === origin.x && firstHop.y === origin.y;
-  const waypoints: Waypoint[] = [
-    { x: origin.x, y: origin.y },
-    ...(startsAtFirstHop ? routePath.slice(1) : routePath).map((p) => ({ x: p.x, y: p.y })),
-  ];
-  const { departedAt, arrivalAt } = planTravelAlongPath(waypoints);
-
-  let finalDestination = destination;
-  let finalWaypoints = waypoints;
-  let finalDepartedAt = departedAt;
-  let finalArrivalAt = arrivalAt;
-  let actionType: string | null = null;
-  let actionStartedAt: string | null = null;
-  let actionEndsAt: string | null = null;
-
-  // arriver sur un monde du Cartel risque une saisie du vaisseau (50%),
-  // tirée au sort dès maintenant : détourné vers Nal Hutta au lieu de sa
-  // destination prévue, révélé dès le départ — sauf pour un vaisseau du
-  // Cartel lui-même, chez lui
-  if (destination.faction === "cartel" && ship.faction !== "cartel" && rollCartelSeizure()) {
-    const seizurePath = shortestPath(originPlanet.name, NAL_HUTTA.name);
-    if (seizurePath) {
-      const seizureFirstHop = seizurePath[0];
-      const seizureStartsAtFirstHop = seizureFirstHop.x === origin.x && seizureFirstHop.y === origin.y;
-      const seizureWaypoints: Waypoint[] = [
-        { x: origin.x, y: origin.y },
-        ...(seizureStartsAtFirstHop ? seizurePath.slice(1) : seizurePath).map((p) => ({ x: p.x, y: p.y })),
-      ];
-      const seizureTravel = planTravelAlongPath(seizureWaypoints);
-      finalDestination = NAL_HUTTA;
-      finalWaypoints = seizureWaypoints;
-      finalDepartedAt = seizureTravel.departedAt;
-      finalArrivalAt = seizureTravel.arrivalAt;
-      actionType = "seized";
-      actionStartedAt = finalArrivalAt.toISOString();
-      actionEndsAt = new Date(finalArrivalAt.getTime() + SEIZURE_DURATION_SECONDS * 1000).toISOString();
-    }
   }
 
   const updated = await db.sql`
     update ships
     set x = ${origin.x}, y = ${origin.y},
-        dest_x = ${finalDestination.x}, dest_y = ${finalDestination.y}, dest_planet = ${finalDestination.name},
-        path = ${JSON.stringify(finalWaypoints)}::jsonb,
-        departed_at = ${finalDepartedAt.toISOString()}, arrival_at = ${finalArrivalAt.toISOString()},
+        dest_x = ${plan.destination.x}, dest_y = ${plan.destination.y}, dest_planet = ${plan.destination.name},
+        path = ${JSON.stringify(plan.waypoints)}::jsonb,
+        departed_at = ${plan.departedAt.toISOString()}, arrival_at = ${plan.arrivalAt.toISOString()},
         damaged = ${repaired ? false : ship.damaged},
         encounter_pending = false, encounter_at = null, encounter_win_chance = null,
         encounter_x = null, encounter_y = null, encounter_enemy_faction = null,
-        action_type = ${actionType}, action_started_at = ${actionStartedAt}, action_ends_at = ${actionEndsAt},
+        action_type = ${plan.actionType}, action_started_at = ${plan.actionStartedAt}, action_ends_at = ${plan.actionEndsAt},
         updated_at = now()
     where id = ${id}::uuid
     returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,

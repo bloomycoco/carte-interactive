@@ -2,10 +2,11 @@
 // dépendance Node) et ajoute la génération de code, qui a besoin de
 // crypto — ce fichier est donc réservé au serveur.
 import crypto from "node:crypto";
-import { currentPosition, type Faction, type Waypoint } from "./fleet-motion";
+import { currentPosition, planTravelAlongPath, type Faction, type Waypoint } from "./fleet-motion";
 import { PLANETS, type Planet } from "./planets";
 import { reachableWithin, shortestPath } from "./routes";
 import { SHIP_CLASSES } from "./ship-classes";
+import { SEIZURE_DURATION_SECONDS } from "./planet-actions";
 
 export * from "./fleet-motion";
 
@@ -140,6 +141,113 @@ export function pickNpcFleetFlavor(faction: "csi" | "mandalore" | "cartel") {
 export function pickNpcSpawnPlanet(faction: Faction): Planet {
   const candidates = PLANETS.filter((p) => p.faction === faction);
   return candidates[crypto.randomInt(candidates.length)];
+}
+
+const NAL_HUTTA = PLANETS.find((p) => p.name === "Nal Hutta")!;
+
+export type OrderPlan = {
+  destination: Planet;
+  waypoints: Waypoint[];
+  departedAt: Date;
+  arrivalAt: Date;
+  actionType: "seized" | null;
+  actionStartedAt: string | null;
+  actionEndsAt: string | null;
+};
+
+// Calcule le trajet (et l'éventuelle saisie par le Cartel) pour un ordre
+// donné à un vaisseau — partagé entre l'ordre individuel
+// (POST /api/ships/[id]/order) et l'ordre groupé au code Capitaine
+// (POST /api/fleets/[id]/order), pour ne pas dupliquer cette logique.
+// `origin` doit déjà être la position ACTUELLE du vaisseau (interpolée si
+// en trajet). Renvoie null si aucune route n'existe vers la destination.
+export function planShipOrder(
+  origin: { x: number; y: number },
+  originPlanetName: string,
+  destination: Planet,
+  shipFaction: Faction,
+): OrderPlan | null {
+  const routePath = shortestPath(originPlanetName, destination.name);
+  if (!routePath) return null;
+
+  const firstHop = routePath[0];
+  const startsAtFirstHop = firstHop.x === origin.x && firstHop.y === origin.y;
+  const waypoints: Waypoint[] = [
+    { x: origin.x, y: origin.y },
+    ...(startsAtFirstHop ? routePath.slice(1) : routePath).map((p) => ({ x: p.x, y: p.y })),
+  ];
+  const { departedAt, arrivalAt } = planTravelAlongPath(waypoints);
+
+  const plan: OrderPlan = {
+    destination,
+    waypoints,
+    departedAt,
+    arrivalAt,
+    actionType: null,
+    actionStartedAt: null,
+    actionEndsAt: null,
+  };
+
+  // arriver sur un monde du Cartel risque une saisie du vaisseau (50%),
+  // tirée au sort dès maintenant : détourné vers Nal Hutta au lieu de sa
+  // destination prévue, révélé dès le départ — sauf pour un vaisseau du
+  // Cartel lui-même, chez lui
+  if (destination.faction === "cartel" && shipFaction !== "cartel" && rollCartelSeizure()) {
+    const seizurePath = shortestPath(originPlanetName, NAL_HUTTA.name);
+    if (seizurePath) {
+      const seizureFirstHop = seizurePath[0];
+      const seizureStartsAtFirstHop = seizureFirstHop.x === origin.x && seizureFirstHop.y === origin.y;
+      const seizureWaypoints: Waypoint[] = [
+        { x: origin.x, y: origin.y },
+        ...(seizureStartsAtFirstHop ? seizurePath.slice(1) : seizurePath).map((p) => ({ x: p.x, y: p.y })),
+      ];
+      const seizureTravel = planTravelAlongPath(seizureWaypoints);
+      plan.destination = NAL_HUTTA;
+      plan.waypoints = seizureWaypoints;
+      plan.departedAt = seizureTravel.departedAt;
+      plan.arrivalAt = seizureTravel.arrivalAt;
+      plan.actionType = "seized";
+      plan.actionStartedAt = plan.arrivalAt.toISOString();
+      plan.actionEndsAt = new Date(plan.arrivalAt.getTime() + SEIZURE_DURATION_SECONDS * 1000).toISOString();
+    }
+  }
+
+  return plan;
+}
+
+// Un vaisseau peut-il recevoir un nouvel ordre maintenant ? (rencontre en
+// cours non résolue, action de surface en cours, ou endommagé hors
+// Coruscant) — partagé entre l'ordre individuel et l'ordre groupé.
+export function shipOrderBlockReason(
+  ship: {
+    damaged: boolean;
+    encounter_pending: boolean;
+    encounter_at: string | null;
+    action_started_at: string | null;
+    action_ends_at: string | null;
+  },
+  origin: { x: number; y: number; traveling: boolean },
+  destinationName: string,
+  now = Date.now(),
+): string | null {
+  if (ship.encounter_pending && ship.encounter_at && new Date(ship.encounter_at).getTime() <= now) {
+    return "rencontre en cours à résoudre";
+  }
+  if (
+    ship.action_ends_at &&
+    ship.action_started_at &&
+    new Date(ship.action_started_at).getTime() <= now &&
+    new Date(ship.action_ends_at).getTime() > now
+  ) {
+    return "immobilisé pour le moment";
+  }
+  const CORUSCANT = PLANETS.find((p) => p.name === "Coruscant")!;
+  const idleAtCoruscant =
+    !origin.traveling && Math.abs(origin.x - CORUSCANT.x) < 1 && Math.abs(origin.y - CORUSCANT.y) < 1;
+  if (ship.damaged && !idleAtCoruscant && destinationName !== "Coruscant") {
+    return "endommagé, doit rejoindre Coruscant";
+  }
+  return null;
 }
 
 // Choisit une destination aléatoire ET son trajet pour une flotte NPC :

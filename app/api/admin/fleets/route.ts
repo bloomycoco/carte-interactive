@@ -19,12 +19,13 @@ export async function GET() {
     faction: Faction;
     is_npc: boolean;
     code: string;
+    captain_code: string | null;
     kills: number;
     losses: number;
     created_at: string;
     updated_at: string;
   }>`
-    select id, name, faction, is_npc, code, kills, losses, created_at, updated_at
+    select id, name, faction, is_npc, code, captain_code, kills, losses, created_at, updated_at
     from fleets order by created_at asc
   `;
   const ships = await db.sql<{
@@ -79,6 +80,9 @@ export async function POST(request: Request) {
     typeof body?.code === "string" && body.code.trim()
       ? body.code.trim().toUpperCase()
       : generateCode();
+  // seules les flottes joueur ont un capitaine — les flottes NPC n'ont
+  // personne pour recevoir un ordre groupé
+  const captainCode = isNpc ? null : generateCode();
 
   if (!name) return NextResponse.json({ error: "nom requis" }, { status: 400 });
   if (isNpc) {
@@ -95,9 +99,9 @@ export async function POST(request: Request) {
   const db = getDatabase();
   try {
     const rows = await db.sql`
-      insert into fleets (name, faction, code, is_npc)
-      values (${name}, ${faction}, ${code}, ${isNpc})
-      returning id, name, faction, is_npc, code, kills, losses, created_at, updated_at
+      insert into fleets (name, faction, code, captain_code, is_npc)
+      values (${name}, ${faction}, ${code}, ${captainCode}, ${isNpc})
+      returning id, name, faction, is_npc, code, captain_code, kills, losses, created_at, updated_at
     `;
     return NextResponse.json({ fleet: { ...rows[0], strength: fleetStrength([], 0, 0), ships: [] } });
   } catch {

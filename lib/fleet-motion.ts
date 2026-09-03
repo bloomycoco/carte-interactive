@@ -86,6 +86,17 @@ export type UnlockedFleet = {
   ships: { id: string; name: string; dest_planet: string | null }[];
 };
 
+// Une flotte déverrouillée avec son code CAPITAINE : donne le droit
+// d'envoyer TOUTE la flotte quelque part en un ordre (distinct du code de
+// flotte, lecture seule, et du code de chaque vaisseau, individuel).
+export type UnlockedCaptainFleet = {
+  id: string;
+  code: string;
+  name: string;
+  faction: Faction;
+  strength: number;
+};
+
 // Un vaisseau "déverrouillé" côté navigateur avec son propre code : donne
 // le contrôle (peut recevoir des ordres).
 export type UnlockedShip = {

@@ -15,6 +15,9 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/flee
   const name = typeof body.name === "string" ? body.name.trim() : undefined;
   const regenerateCode = body.regenerateCode === true;
   const explicitCode = typeof body.code === "string" ? body.code.trim().toUpperCase() : undefined;
+  const regenerateCaptainCode = body.regenerateCaptainCode === true;
+  const explicitCaptainCode =
+    typeof body.captainCode === "string" ? body.captainCode.trim().toUpperCase() : undefined;
 
   const db = getDatabase();
 
@@ -29,9 +32,17 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/flee
       return NextResponse.json({ error: "ce code de flotte existe déjà" }, { status: 409 });
     }
   }
+  if (regenerateCaptainCode || explicitCaptainCode) {
+    const newCaptainCode = explicitCaptainCode || generateCode();
+    try {
+      await db.sql`update fleets set captain_code = ${newCaptainCode}, updated_at = now() where id = ${id}::uuid`;
+    } catch {
+      return NextResponse.json({ error: "ce code Capitaine existe déjà" }, { status: 409 });
+    }
+  }
 
   const rows = await db.sql`
-    select id, name, faction, code, created_at, updated_at from fleets where id = ${id}::uuid
+    select id, name, faction, code, captain_code, created_at, updated_at from fleets where id = ${id}::uuid
   `;
   if (!rows[0]) return NextResponse.json({ error: "not found" }, { status: 404 });
   return NextResponse.json({ fleet: rows[0] });
