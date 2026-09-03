@@ -2,10 +2,15 @@ import { getDatabase } from "@/lib/db";
 import { NextResponse } from "next/server";
 import {
   currentPosition,
+  generateCode,
   planTravelAlongPath,
+  pickNpcFleetFlavor,
   pickNpcRoute,
+  pickNpcSpawnPlanet,
   rollEncounterOdds,
   ENCOUNTER_PROXIMITY,
+  NPC_FACTIONS,
+  NPC_FLEET_TARGET_COUNT,
   type Faction,
   type Waypoint,
 } from "@/lib/fleets";
@@ -45,6 +50,8 @@ type ShipRow = {
 // Liste publique de tous les vaisseaux, pour les afficher sur la carte.
 // Fait aussi tourner la simulation "en direct" à chaque appel (interrogé
 // toutes les 4s par chaque onglet ouvert, faute de tâche de fond) :
+// 0) chaque camp NPC garde toujours 3 flottes sur la carte (une flotte
+//    détruite au combat réapparaît après son délai de respawn) ;
 // 1) les flottes NPC à quai reprennent la route vers une planète de leur
 //    propre clan ; 2) un vaisseau République en transit qui passe près
 //    d'un NPC en transit déclenche une vraie rencontre.
@@ -64,6 +71,87 @@ export async function GET() {
     join fleets f on f.id = s.fleet_id
     order by s.created_at asc
   `;
+
+  // 0) maintien du nombre de flottes NPC : chaque camp (CSI, Mandalore,
+  // Cartel) garde toujours NPC_FLEET_TARGET_COUNT flottes sur la carte.
+  // Une flotte détruite au combat (voir resolve-encounter) n'est pas
+  // supprimée : elle reste sans vaisseau avec une date de réapparition
+  // (respawn_at), et se voit redonner un vaisseau ici une fois ce délai
+  // écoulé.
+  async function spawnNpcShip(
+    fleetId: string,
+    faction: "csi" | "mandalore" | "cartel",
+    name: string,
+    category: string,
+  ): Promise<ShipRow> {
+    const spawnPlanet = pickNpcSpawnPlanet(faction);
+    const rows = await db.sql<{ id: string }>`
+      insert into ships (fleet_id, name, category, code, x, y)
+      values (${fleetId}::uuid, ${name}, ${category}, ${generateCode()}, ${spawnPlanet.x}, ${spawnPlanet.y})
+      returning id
+    `;
+    return {
+      id: rows[0].id,
+      fleet_id: fleetId,
+      name,
+      category,
+      faction,
+      is_npc: true,
+      x: spawnPlanet.x,
+      y: spawnPlanet.y,
+      dest_x: null,
+      dest_y: null,
+      dest_planet: null,
+      departed_at: null,
+      arrival_at: null,
+      path: null,
+      damaged: false,
+      encounter_pending: false,
+      encounter_at: null,
+      encounter_win_chance: null,
+      encounter_enemy_faction: null,
+      encounter_npc_ship_id: null,
+      action_type: null,
+      action_started_at: null,
+      action_ends_at: null,
+      quest_type: null,
+      quest_origin_planet: null,
+      quest_target_planet: null,
+      quest_phase: null,
+    };
+  }
+
+  const npcFleetRows = await db.sql<{
+    id: string;
+    name: string;
+    faction: "csi" | "mandalore" | "cartel";
+    respawn_at: string | null;
+  }>`
+    select id, name, faction, respawn_at from fleets
+    where is_npc = true and faction in ('csi', 'mandalore', 'cartel')
+  `;
+
+  for (const faction of NPC_FACTIONS) {
+    const factionFleets = npcFleetRows.filter((f) => f.faction === faction);
+    const missing = NPC_FLEET_TARGET_COUNT - factionFleets.length;
+    for (let i = 0; i < missing; i++) {
+      const { name, category } = pickNpcFleetFlavor(faction);
+      const [fleet] = await db.sql<{ id: string }>`
+        insert into fleets (name, faction, code, is_npc)
+        values (${name}, ${faction}, ${generateCode()}, true)
+        returning id
+      `;
+      ships.push(await spawnNpcShip(fleet.id, faction, name, category));
+    }
+
+    for (const f of factionFleets) {
+      if (ships.some((s) => s.fleet_id === f.id)) continue;
+      if (f.respawn_at && new Date(f.respawn_at).getTime() > now) continue;
+      const { category } = pickNpcFleetFlavor(faction);
+      ships.push(await spawnNpcShip(f.id, faction, f.name, category));
+      await db.sql`update fleets set respawn_at = null, updated_at = now() where id = ${f.id}::uuid`;
+    }
+  }
 
   // 1) flottes NPC à quai : reprennent la route vers une planète de leur
   // propre clan (jamais hors de leur territoire)

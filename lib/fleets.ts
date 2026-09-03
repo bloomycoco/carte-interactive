@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import { currentPosition, type Faction, type Waypoint } from "./fleet-motion";
 import { PLANETS, type Planet } from "./planets";
 import { reachableWithin, shortestPath } from "./routes";
+import { SHIP_CLASSES } from "./ship-classes";
 
 export * from "./fleet-motion";
 
@@ -103,6 +104,42 @@ export function pickHumanitarianQuestTarget(origin: Planet): Planet {
   const poolSize = Math.max(1, Math.round(others.length * HUMANITARIAN_FAR_FRACTION));
   const pool = others.slice(0, poolSize);
   return pool[crypto.randomInt(pool.length)].p;
+}
+
+// Camps NPC (jamais joueur) et nombre de flottes que chacun doit toujours
+// avoir sur la carte — une flotte détruite au combat réapparaît après
+// NPC_RESPAWN_SECONDS plutôt que de disparaître pour de bon.
+export const NPC_FACTIONS: ("csi" | "mandalore" | "cartel")[] = ["csi", "mandalore", "cartel"];
+export const NPC_FLEET_TARGET_COUNT = 3;
+export const NPC_RESPAWN_SECONDS = 5 * 60;
+
+const NPC_FLEET_NAME_POOL: Record<"csi" | "mandalore" | "cartel", string[]> = {
+  csi: ["Escadron Séparatiste", "Flotte de Raxus", "Patrouille CSI", "Garde Confédérée", "Convoi Techno-Union"],
+  mandalore: [
+    "Faucons de Death Watch",
+    "Patrouille Mandalorienne",
+    "Garde de Concord Dawn",
+    "Chasseurs Kyr'tsad",
+    "Escadron Carlac",
+  ],
+  cartel: ["Convoi du Cartel", "Garde de Jabba", "Patrouille Hutt", "Escadron Pyke", "Contrebandiers Nikto"],
+};
+
+// Nom + classe tirés au sort pour une flotte NPC nouvellement créée ou
+// qui réapparaît après avoir été détruite.
+export function pickNpcFleetFlavor(faction: "csi" | "mandalore" | "cartel") {
+  const names = NPC_FLEET_NAME_POOL[faction];
+  const name = `${names[crypto.randomInt(names.length)]} ${crypto.randomInt(100)}`;
+  const classes = SHIP_CLASSES[faction];
+  const category = classes[crypto.randomInt(classes.length)];
+  return { name, category };
+}
+
+// Planète de départ pour une flotte NPC qui apparaît (nouvelle ou
+// réapparition) : n'importe quelle planète de son propre territoire.
+export function pickNpcSpawnPlanet(faction: Faction): Planet {
+  const candidates = PLANETS.filter((p) => p.faction === faction);
+  return candidates[crypto.randomInt(candidates.length)];
 }
 
 // Choisit une destination aléatoire ET son trajet pour une flotte NPC :

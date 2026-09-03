@@ -1,6 +1,7 @@
 import { getDatabase } from "@/lib/db";
 import { NextResponse } from "next/server";
 import {
+  NPC_RESPAWN_SECONDS,
   planTravelAlongPath,
   positionAt,
   rollCombatWin,
@@ -67,15 +68,34 @@ export async function POST(
       ? { x: ship.encounter_x, y: ship.encounter_y }
       : positionAt(ship.path, new Date(ship.departed_at), new Date(ship.arrival_at), encounterAt);
 
-  // quel que soit le choix, le vaisseau NPC croisé redevient libre de
-  // reprendre sa route
-  if (ship.encounter_npc_ship_id) {
+  // le vaisseau NPC croisé redevient libre de reprendre sa route — sauf
+  // en cas de victoire au combat, où il est détruit (voir destroyNpc)
+  async function releaseNpc() {
+    if (!ship!.encounter_npc_ship_id) return;
     await db.sql`
       update ships
       set encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
           updated_at = now()
-      where id = ${ship.encounter_npc_ship_id}::uuid
+      where id = ${ship!.encounter_npc_ship_id}::uuid
     `;
+  }
+
+  // victoire au combat : le vaisseau NPC est détruit, retiré de la carte
+  // — sa flotte n'est pas supprimée, elle réapparaîtra dans
+  // NPC_RESPAWN_SECONDS (voir le tick dans GET /api/ships)
+  async function destroyNpc() {
+    if (!ship!.encounter_npc_ship_id) return;
+    const [npc] = await db.sql<{ fleet_id: string }>`
+      select fleet_id from ships where id = ${ship!.encounter_npc_ship_id}::uuid
+    `;
+    await db.sql`delete from ships where id = ${ship!.encounter_npc_ship_id}::uuid`;
+    if (npc) {
+      const respawnAt = new Date(Date.now() + NPC_RESPAWN_SECONDS * 1000).toISOString();
+      await db.sql`
+        update fleets set losses = losses + 1, respawn_at = ${respawnAt}, updated_at = now()
+        where id = ${npc.fleet_id}::uuid
+      `;
+    }
   }
 
   async function resume(outcome: "won" | "negotiated") {
@@ -137,6 +157,7 @@ export async function POST(
   }
 
   if (choice === "flee") {
+    await releaseNpc();
     // fuir réussit toujours, sans dégât : le vaisseau rebrousse chemin
     // vers la planète d'où il venait pour ce trajet
     const homePlanet = nearestPlanet(ship.path[0].x, ship.path[0].y);
@@ -173,13 +194,24 @@ export async function POST(
   }
 
   if (choice === "negotiate") {
-    if (rollNegotiationSuccess()) return resume("negotiated");
+    if (rollNegotiationSuccess()) {
+      await releaseNpc();
+      return resume("negotiated");
+    }
     // négociation ratée : combat, résolu comme "combattre"
-    if (rollCombatWin(ship.encounter_win_chance ?? 50)) return resume("won");
+    if (rollCombatWin(ship.encounter_win_chance ?? 50)) {
+      await destroyNpc();
+      return resume("won");
+    }
+    await releaseNpc();
     return loseCombat();
   }
 
   // choice === "fight"
-  if (rollCombatWin(ship.encounter_win_chance ?? 50)) return resume("won");
+  if (rollCombatWin(ship.encounter_win_chance ?? 50)) {
+    await destroyNpc();
+    return resume("won");
+  }
+  await releaseNpc();
   return loseCombat();
 }
