@@ -390,6 +390,39 @@ export default function GalaxyMap() {
     }
   }
 
+  // envoie TOUTE une flotte (code Capitaine) en chasse du même NPC —
+  // chaque vaisseau se réoriente et rattrape la cible indépendamment,
+  // exactement comme une chasse individuelle
+  async function chaseFleet(fleetId: string, targetId: string) {
+    const unlocked = unlockedCaptains.find((u) => u.id === fleetId);
+    if (!unlocked) return;
+    setChasingNpc(true);
+    try {
+      const res = await fetch(`/api/fleets/${fleetId}/chase`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: unlocked.code, targetId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFleetNotice(data.error ?? "échec de la prise en chasse");
+        return;
+      }
+      const chasing = (data.results as { status: "chasing" | "skipped" }[]).filter(
+        (r) => r.status === "chasing",
+      ).length;
+      const skipped = data.results.length - chasing;
+      setFleetNotice(
+        `${unlocked.name} : ${chasing} vaisseau(x) en chasse` + (skipped > 0 ? `, ${skipped} occupé(s) ignoré(s)` : ""),
+      );
+      setSelectedShipId(null);
+    } catch {
+      setFleetNotice("erreur réseau");
+    } finally {
+      setChasingNpc(false);
+    }
+  }
+
   // une flotte ennemie a été croisée par un vaisseau qu'on contrôle et
   // attend une décision (combattre / fuir)
   const encounterShip = ships.find(
@@ -1265,6 +1298,16 @@ export default function GalaxyMap() {
               </div>
             </div>
             <div className={styles.panelActions}>
+              {unlockedCaptains.map((u) => (
+                <button
+                  key={u.id}
+                  className={styles.actionBtn}
+                  disabled={chasingNpc}
+                  onClick={() => chaseFleet(u.id, selectedNpc.id)}
+                >
+                  ⚔ Toute la flotte en chasse — {u.name}
+                </button>
+              ))}
               {unlockedShips.length > 0 ? (
                 unlockedShips.map((u) => (
                   <button
@@ -1276,15 +1319,15 @@ export default function GalaxyMap() {
                     ⚔ Prendre en chasse — {u.name}
                   </button>
                 ))
-              ) : (
+              ) : unlockedCaptains.length === 0 ? (
                 <button
                   className={`${styles.actionBtn} ${styles.actionBtnDisabled}`}
                   disabled
-                  title="Déverrouille un vaisseau (bouton « Mes Flottes ») pour le prendre en chasse"
+                  title="Déverrouille un vaisseau ou une flotte (bouton « Mes Flottes ») pour le prendre en chasse"
                 >
                   Prendre en chasse
                 </button>
-              )}
+              ) : null}
             </div>
           </div>
         ) : selected ? (
