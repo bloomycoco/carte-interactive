@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { currentPosition, planTravelAlongPath, type Faction, type Waypoint } from "./fleet-motion";
 import { PLANETS, type Planet } from "./planets";
 import { reachableWithin, shortestPath } from "./routes";
-import { SHIP_CLASSES } from "./ship-classes";
+import { SHIP_CLASSES, fleetStrength } from "./ship-classes";
 import { SEIZURE_DURATION_SECONDS } from "./planet-actions";
 
 export * from "./fleet-motion";
@@ -32,6 +32,53 @@ function randomFraction() {
 // GET /api/ships), pas un tirage abstrait.
 export const ENCOUNTER_PROXIMITY = 120;
 
+// Distance en dessous de laquelle des vaisseaux d'une même flotte sont
+// considérés comme PHYSIQUEMENT rassemblés (à quai ensemble, ou en
+// formation groupée pendant un ordre au code Capitaine) — sert à
+// calculer la force réellement engagée dans une rencontre : pas toute
+// la flotte dispersée sur la carte, seulement ceux qui sont vraiment là.
+const GROUP_PROXIMITY = 5;
+
+// Bonus de coordination par vaisseau au-delà du premier, quand ils sont
+// physiquement rassemblés — une vraie formation combat mieux qu'une
+// somme de vaisseaux isolés.
+const GROUP_COHESION_BONUS_PER_SHIP = 0.1;
+
+// Force de combat réellement engagée dans une rencontre : seulement les
+// vaisseaux de la flotte physiquement rassemblés avec le vaisseau
+// engagé (voir GROUP_PROXIMITY), avec un bonus de coordination au-delà
+// d'un seul — remplace fleetStrength(flotte entière) pour tout ce qui
+// est rencontre (transit/sol/chasse), afin que se regrouper physiquement
+// ait un effet réel sur le combat.
+export function groupedFleetStrength(
+  allFleetShips: {
+    id: string;
+    category: string | null;
+    x: number;
+    y: number;
+    dest_x: number | null;
+    dest_y: number | null;
+    departed_at: string | null;
+    arrival_at: string | null;
+    path: Waypoint[] | null;
+  }[],
+  engagingShipId: string,
+  kills: number,
+  losses: number,
+  now = Date.now(),
+) {
+  const engaging = allFleetShips.find((s) => s.id === engagingShipId);
+  if (!engaging) return { strength: 0, count: 0 };
+  const engagingPos = currentPosition(engaging, now);
+  const grouped = allFleetShips.filter((s) => {
+    const p = currentPosition(s, now);
+    return Math.hypot(p.x - engagingPos.x, p.y - engagingPos.y) <= GROUP_PROXIMITY;
+  });
+  const base = fleetStrength(grouped, kills, losses);
+  const bonus = 1 + GROUP_COHESION_BONUS_PER_SHIP * Math.max(0, grouped.length - 1);
+  return { strength: base * bonus, count: grouped.length };
+}
+
 // Distance en dessous de laquelle un vaisseau qui poursuit délibérément
 // un NPC (voir POST /api/ships/[id]/chase) est considéré comme l'ayant
 // rattrapé — plus généreuse qu'ENCOUNTER_PROXIMITY car il ne s'agit pas
@@ -49,6 +96,15 @@ export const CHASE_SPEED_MULTIPLIER = 1.5;
 // soit sa force.
 export const MIN_ATTACK_FLEET_SIZE = 4;
 
+// Une capitale (voir Planet.capital) est volontairement quasi
+// imprenable : il en faut beaucoup plus rassemblés pour même tenter.
+export const MIN_ATTACK_FLEET_SIZE_CAPITAL = 10;
+
+// Seuil effectif pour une planète donnée — capitale ou non.
+export function minAttackFleetSize(planet: { capital?: boolean }): number {
+  return planet.capital ? MIN_ATTACK_FLEET_SIZE_CAPITAL : MIN_ATTACK_FLEET_SIZE;
+}
+
 // Force ennemie aléatoire (min/max) : comparable à une flotte modeste
 // de 1 à 2 vaisseaux moyens, pour que les chances restent disputées.
 const ENEMY_STRENGTH_MIN = 4;
@@ -56,11 +112,28 @@ const ENEMY_STRENGTH_MAX = 16;
 
 // Tire au sort la force de la flotte ennemie croisée et en déduit un %
 // de chances de victoire (ratio de forces) — affiché au joueur avant
-// qu'il ne choisisse de combattre, négocier, ou fuir.
-export function rollEncounterOdds(friendlyStrength: number) {
-  const enemyStrength = ENEMY_STRENGTH_MIN + randomFraction() * (ENEMY_STRENGTH_MAX - ENEMY_STRENGTH_MIN);
+// qu'il ne choisisse de combattre, négocier, ou fuir. enemyMultiplier
+// vient du réglage de difficulté par camp (page Owner, voir
+// npcDifficultyMultiplier) : > 1 rend ce camp plus dur à affronter.
+export function rollEncounterOdds(friendlyStrength: number, enemyMultiplier = 1) {
+  const enemyStrength =
+    (ENEMY_STRENGTH_MIN + randomFraction() * (ENEMY_STRENGTH_MAX - ENEMY_STRENGTH_MIN)) * enemyMultiplier;
   const winChancePercent = Math.round((friendlyStrength / (friendlyStrength + enemyStrength)) * 100);
   return Math.min(95, Math.max(5, winChancePercent));
+}
+
+// Charge les multiplicateurs de difficulté par camp NPC (page Owner),
+// avec repli à 1.0 (aucun changement) si la table est vide ou muette
+// sur un camp donné.
+export async function npcDifficultyMultipliers(
+  db: ReturnType<typeof import("./db").getDatabase>,
+): Promise<Record<"csi" | "mandalore" | "cartel", number>> {
+  const rows = await db.sql<{ faction: "csi" | "mandalore" | "cartel"; multiplier: number }>`
+    select faction, multiplier from npc_difficulty
+  `;
+  const result: Record<"csi" | "mandalore" | "cartel", number> = { csi: 1, mandalore: 1, cartel: 1 };
+  for (const row of rows) result[row.faction] = row.multiplier;
+  return result;
 }
 
 // Résout un combat selon le % de chances déjà annoncé au joueur (calculé
@@ -85,7 +158,7 @@ export function rollCartelSeizure() {
   return randomFraction() < CARTEL_SEIZURE_CHANCE;
 }
 
-// Le CSI tente de reprendre une planète contestée (> 50% d'influence
+// Le CSI tente de reprendre une planète contestée (> 10% d'influence
 // République) : à chaque tick, chance qu'il lance une contre-attaque
 // (annoncée un moment avant de résoudre, voir CSI_COUNTERATTACK_
 // TELEGRAPH_SECONDS) — une victoire CSI reprend d'un coup bien plus de
@@ -150,6 +223,25 @@ export const NPC_FLEET_TARGET_COUNT: Record<"csi" | "mandalore" | "cartel", numb
   cartel: 3,
 };
 export const NPC_RESPAWN_SECONDS = 5 * 60;
+
+// Chaque flotte NPC ("patrouille") est composée de plusieurs vaisseaux
+// (jamais un seul) qui voyagent groupés — une rencontre est donc une
+// vraie bataille à plusieurs contre plusieurs, pas 1 contre 1.
+const NPC_FLEET_SHIP_COUNT_MIN = 2;
+const NPC_FLEET_SHIP_COUNT_MAX = 4;
+
+export function pickNpcFleetShipCount() {
+  return NPC_FLEET_SHIP_COUNT_MIN + crypto.randomInt(NPC_FLEET_SHIP_COUNT_MAX - NPC_FLEET_SHIP_COUNT_MIN + 1);
+}
+
+// Classe tirée au sort pour UN vaisseau d'une patrouille NPC (à
+// distinguer de pickNpcFleetFlavor, qui donne le nom partagé de toute
+// la patrouille) — chaque vaisseau de la patrouille peut avoir sa
+// propre classe, pour un peu de variété.
+export function pickNpcShipCategory(faction: "csi" | "mandalore" | "cartel") {
+  const classes = SHIP_CLASSES[faction];
+  return classes[crypto.randomInt(classes.length)];
+}
 
 const NPC_FLEET_NAME_POOL: Record<"csi" | "mandalore" | "cartel", string[]> = {
   csi: ["Escadron Séparatiste", "Flotte de Raxus", "Patrouille CSI", "Garde Confédérée", "Convoi Techno-Union"],

@@ -40,6 +40,12 @@ export type ShipTravelState = {
   // délibérément pris le NPC en chasse (Combattre/Négocier/Fuir, comme
   // "transit", mais fuir replie vers Kuat comme "ground").
   encounter_kind?: "transit" | "ground" | "chase" | null;
+  // nombre de vaisseaux de chaque côté au moment où la rencontre a été
+  // déclenchée — friendly = ceux physiquement rassemblés avec ce
+  // vaisseau (voir groupedFleetStrength), enemy = toute la patrouille
+  // NPC croisée. Purement informatif, pour l'affichage "N vs M".
+  encounter_friendly_count?: number | null;
+  encounter_enemy_count?: number | null;
   // poursuite en cours (voir POST /api/ships/[id]/chase) : id du
   // vaisseau NPC visé, tant qu'il n'a pas été rattrapé (ni abandonné).
   // Ne fige rien à lui seul — c'est le tick de GET /api/ships qui

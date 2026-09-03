@@ -2,11 +2,12 @@ import { getDatabase } from "@/lib/db";
 import { NextResponse } from "next/server";
 import {
   currentPosition,
+  npcDifficultyMultipliers,
   pickHumanitarianQuestTarget,
   planTravelAlongPath,
   rollCombatWin,
   rollEncounterOdds,
-  MIN_ATTACK_FLEET_SIZE,
+  minAttackFleetSize,
   type Waypoint,
 } from "@/lib/fleets";
 import { nearestPlanet, shortestPath } from "@/lib/routes";
@@ -94,6 +95,11 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
   }
 
   const planet = nearestPlanet(pos.x, pos.y);
+  const difficulty = await npcDifficultyMultipliers(db);
+  const enemyMultiplier =
+    planet.faction === "csi" || planet.faction === "mandalore" || planet.faction === "cartel"
+      ? difficulty[planet.faction]
+      : 1;
   const quest: HumanitarianQuest =
     ship.quest_type === "humanitarian" && ship.quest_origin_planet && ship.quest_target_planet && ship.quest_phase
       ? { originPlanet: ship.quest_origin_planet, targetPlanet: ship.quest_target_planet, phase: ship.quest_phase }
@@ -191,17 +197,18 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
     const [fleetRow] = await db.sql<{ kills: number; losses: number }>`
       select kills, losses from fleets where id = ${ship.fleet_id}::uuid
     `;
-    const tooSmall = fleetShipsAll.length < MIN_ATTACK_FLEET_SIZE;
+    const minFleetSize = minAttackFleetSize(planet);
+    const tooSmall = fleetShipsAll.length < minFleetSize;
     const winChance = tooSmall
       ? 0
-      : rollEncounterOdds(fleetStrength(fleetShipsAll, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0));
+      : rollEncounterOdds(fleetStrength(fleetShipsAll, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0), enemyMultiplier);
     return NextResponse.json({
       ok: true,
       type,
       planet: planet.name,
       winChance,
       fleetSize: fleetShipsAll.length,
-      minFleetSize: MIN_ATTACK_FLEET_SIZE,
+      minFleetSize,
     });
   }
 
@@ -241,9 +248,10 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
   const [fleetRow] = await db.sql<{ kills: number; losses: number }>`
     select kills, losses from fleets where id = ${ship.fleet_id}::uuid
   `;
-  const tooSmall = fleetShips.length < MIN_ATTACK_FLEET_SIZE;
+  const minFleetSize = minAttackFleetSize(planet);
+  const tooSmall = fleetShips.length < minFleetSize;
   const strength = fleetStrength(fleetShips, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0);
-  const winChance = tooSmall ? 0 : rollEncounterOdds(strength);
+  const winChance = tooSmall ? 0 : rollEncounterOdds(strength, enemyMultiplier);
   const won = !tooSmall && rollCombatWin(winChance);
 
   if (won) {
@@ -299,6 +307,6 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
     outcome: won ? "won" : "lost",
     winChance,
     fleetSize: fleetShips.length,
-    minFleetSize: MIN_ATTACK_FLEET_SIZE,
+    minFleetSize,
   });
 }

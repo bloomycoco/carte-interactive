@@ -1069,6 +1069,12 @@ export default function GalaxyMap() {
                 : ""}
               . Que fait l&apos;équipage ?
             </p>
+            {encounterShip.encounter_friendly_count != null && encounterShip.encounter_enemy_count != null && (
+              <p className={styles.encounterOdds}>
+                {encounterShip.encounter_friendly_count} vaisseau{encounterShip.encounter_friendly_count > 1 ? "x" : ""} contre{" "}
+                {encounterShip.encounter_enemy_count} vaisseau{encounterShip.encounter_enemy_count > 1 ? "x" : ""}
+              </p>
+            )}
             {encounterShip.encounter_win_chance != null && (
               <p className={styles.encounterOdds}>
                 Chances de victoire au combat : <strong>{encounterShip.encounter_win_chance}%</strong>

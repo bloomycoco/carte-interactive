@@ -3,11 +3,15 @@ import { NextResponse } from "next/server";
 import {
   currentPosition,
   generateCode,
+  groupedFleetStrength,
   planShipOrder,
   planTravelAlongPath,
   pickNpcFleetFlavor,
+  pickNpcFleetShipCount,
   pickNpcRoute,
+  pickNpcShipCategory,
   pickNpcSpawnPlanet,
+  npcDifficultyMultipliers,
   rollCombatWin,
   rollCsiCounterattackStart,
   rollEncounterOdds,
@@ -56,6 +60,8 @@ type ShipRow = {
   encounter_kind: "transit" | "ground" | "chase" | null;
   encounter_x: number | null;
   encounter_y: number | null;
+  encounter_friendly_count: number | null;
+  encounter_enemy_count: number | null;
   chase_target_id: string | null;
   action_type: "seized" | null;
   action_started_at: string | null;
@@ -69,27 +75,37 @@ type ShipRow = {
 // Liste publique de tous les vaisseaux, pour les afficher sur la carte.
 // Fait aussi tourner la simulation "en direct" à chaque appel (interrogé
 // toutes les 4s par chaque onglet ouvert, faute de tâche de fond) :
-// 0) chaque camp NPC garde toujours son nombre de flottes sur la carte
-//    (une flotte détruite au combat réapparaît après son délai de
-//    respawn) ; 1) une flotte République et une flotte CSI posées sur la
-//    même planète déclenchent une rencontre au sol (choix différents,
-//    et non résolue passé 30s la CSI attaque en premier) ; 2) les
-//    flottes NPC à quai (non figées) reprennent la route vers une
-//    planète de leur propre clan ; 2.5) une poursuite volontaire en
-//    cours rattrape sa cible (ou se réoriente si elle a changé de cap) ;
-//    3) un vaisseau République en transit qui passe près d'un NPC en
-//    transit déclenche une vraie rencontre.
+// 0) chaque camp NPC garde toujours son nombre de flottes ("patrouilles",
+//    plusieurs vaisseaux chacune) sur la carte (une flotte détruite au
+//    combat réapparaît après son délai de respawn) ; 1) une flotte
+//    République et une patrouille CSI posées sur la même planète
+//    déclenchent une rencontre au sol — TOUTE la patrouille CSI est
+//    impliquée, pas un seul de ses vaisseaux (choix différents, et non
+//    résolue passé 30s la CSI attaque en premier) ; 2) les patrouilles
+//    NPC à quai (non figées) reprennent la route vers une planète de
+//    leur propre clan, TOUS LEURS VAISSEAUX à la fois pour rester
+//    groupés ; 2.5) une poursuite volontaire en cours rattrape sa cible
+//    — et toute sa patrouille — ou se réoriente si elle a changé de cap ;
+//    3) un vaisseau République en transit qui passe près d'une
+//    patrouille NPC en transit déclenche une vraie rencontre contre
+//    TOUTE la patrouille.
+// La force réellement engagée côté République ne compte que les
+// vaisseaux PHYSIQUEMENT rassemblés avec celui qui engage le combat
+// (voir groupedFleetStrength) — se regrouper avant une rencontre
+// augmente donc vraiment les chances de victoire.
 // Ni le code du vaisseau ni celui de sa flotte ne sont renvoyés ici.
 export async function GET() {
   const db = getDatabase();
   const now = Date.now();
+  const difficulty = await npcDifficultyMultipliers(db);
 
   const ships = await db.sql<ShipRow>`
     select s.id, s.fleet_id, s.name, s.category, f.faction, f.is_npc,
            s.x, s.y, s.dest_x, s.dest_y, s.dest_planet,
            s.departed_at, s.arrival_at, s.path, s.damaged,
            s.encounter_pending, s.encounter_at, s.encounter_win_chance, s.encounter_enemy_faction,
-           s.encounter_npc_ship_id, s.encounter_kind, s.encounter_x, s.encounter_y, s.chase_target_id,
+           s.encounter_npc_ship_id, s.encounter_kind, s.encounter_x, s.encounter_y,
+           s.encounter_friendly_count, s.encounter_enemy_count, s.chase_target_id,
            s.action_type, s.action_started_at, s.action_ends_at,
            s.quest_type, s.quest_origin_planet, s.quest_target_planet, s.quest_phase
     from ships s
@@ -99,55 +115,63 @@ export async function GET() {
 
   // 0) maintien du nombre de flottes NPC : chaque camp (CSI, Mandalore,
   // Cartel) garde toujours NPC_FLEET_TARGET_COUNT[faction] flottes sur la
-  // carte. Une flotte détruite au combat (voir resolve-encounter) n'est
-  // pas supprimée : elle reste sans vaisseau avec une date de
-  // réapparition (respawn_at), et se voit redonner un vaisseau ici une
-  // fois ce délai écoulé.
-  async function spawnNpcShip(
+  // carte, chacune composée de plusieurs vaisseaux (une "patrouille",
+  // jamais un seul) qui voyagent groupés. Une flotte détruite au combat
+  // (voir resolve-encounter) n'est pas supprimée : elle reste sans
+  // vaisseau avec une date de réapparition (respawn_at), et se voit
+  // redonner ses vaisseaux ici une fois ce délai écoulé.
+  async function spawnNpcFleetShips(
     fleetId: string,
     faction: "csi" | "mandalore" | "cartel",
-    name: string,
-    category: string,
-  ): Promise<ShipRow> {
+    fleetName: string,
+  ): Promise<ShipRow[]> {
     const spawnPlanet = pickNpcSpawnPlanet(faction);
-    const rows = await db.sql<{ id: string }>`
-      insert into ships (fleet_id, name, category, code, x, y)
-      values (${fleetId}::uuid, ${name}, ${category}, ${generateCode()}, ${spawnPlanet.x}, ${spawnPlanet.y})
-      returning id
-    `;
-    return {
-      id: rows[0].id,
-      fleet_id: fleetId,
-      name,
-      category,
-      faction,
-      is_npc: true,
-      x: spawnPlanet.x,
-      y: spawnPlanet.y,
-      dest_x: null,
-      dest_y: null,
-      dest_planet: null,
-      departed_at: null,
-      arrival_at: null,
-      path: null,
-      damaged: false,
-      encounter_pending: false,
-      encounter_at: null,
-      encounter_win_chance: null,
-      encounter_enemy_faction: null,
-      encounter_npc_ship_id: null,
-      encounter_kind: null,
-      encounter_x: null,
-      encounter_y: null,
-      chase_target_id: null,
-      action_type: null,
-      action_started_at: null,
-      action_ends_at: null,
-      quest_type: null,
-      quest_origin_planet: null,
-      quest_target_planet: null,
-      quest_phase: null,
-    };
+    const count = pickNpcFleetShipCount();
+    const created: ShipRow[] = [];
+    for (let i = 0; i < count; i++) {
+      const category = pickNpcShipCategory(faction);
+      const rows = await db.sql<{ id: string }>`
+        insert into ships (fleet_id, name, category, code, x, y)
+        values (${fleetId}::uuid, ${fleetName}, ${category}, ${generateCode()}, ${spawnPlanet.x}, ${spawnPlanet.y})
+        returning id
+      `;
+      created.push({
+        id: rows[0].id,
+        fleet_id: fleetId,
+        name: fleetName,
+        category,
+        faction,
+        is_npc: true,
+        x: spawnPlanet.x,
+        y: spawnPlanet.y,
+        dest_x: null,
+        dest_y: null,
+        dest_planet: null,
+        departed_at: null,
+        arrival_at: null,
+        path: null,
+        damaged: false,
+        encounter_pending: false,
+        encounter_at: null,
+        encounter_win_chance: null,
+        encounter_enemy_faction: null,
+        encounter_npc_ship_id: null,
+        encounter_kind: null,
+        encounter_x: null,
+        encounter_y: null,
+        encounter_friendly_count: null,
+        encounter_enemy_count: null,
+        chase_target_id: null,
+        action_type: null,
+        action_started_at: null,
+        action_ends_at: null,
+        quest_type: null,
+        quest_origin_planet: null,
+        quest_target_planet: null,
+        quest_phase: null,
+      });
+    }
+    return created;
   }
 
   const npcFleetRows = await db.sql<{
@@ -164,30 +188,30 @@ export async function GET() {
     const factionFleets = npcFleetRows.filter((f) => f.faction === faction);
     const missing = NPC_FLEET_TARGET_COUNT[faction] - factionFleets.length;
     for (let i = 0; i < missing; i++) {
-      const { name, category } = pickNpcFleetFlavor(faction);
+      const { name } = pickNpcFleetFlavor(faction);
       const [fleet] = await db.sql<{ id: string }>`
         insert into fleets (name, faction, code, is_npc)
         values (${name}, ${faction}, ${generateCode()}, true)
         returning id
       `;
-      ships.push(await spawnNpcShip(fleet.id, faction, name, category));
+      ships.push(...(await spawnNpcFleetShips(fleet.id, faction, name)));
     }
 
     for (const f of factionFleets) {
       if (ships.some((s) => s.fleet_id === f.id)) continue;
       if (f.respawn_at && new Date(f.respawn_at).getTime() > now) continue;
-      const { category } = pickNpcFleetFlavor(faction);
-      ships.push(await spawnNpcShip(f.id, faction, f.name, category));
+      ships.push(...(await spawnNpcFleetShips(f.id, faction, f.name)));
       await db.sql`update fleets set respawn_at = null, updated_at = now() where id = ${f.id}::uuid`;
     }
   }
 
-  // 1) rencontres au sol : une flotte République et une flotte CSI (NPC)
-  // posées, idle, sur la MÊME planète (pas en transit) — les deux sont
-  // figées, avec un choix différent (pas de négociation possible avec
-  // le CSI, mais tenter de passer inaperçu). Tourne AVANT le
-  // réassignement des flottes NPC à quai (étape 2) pour ne pas laisser
-  // une flotte CSI repartir avant d'avoir eu la chance d'être détectée.
+  // 1) rencontres au sol : une flotte République et une patrouille CSI
+  // (NPC) posées, idle, sur la MÊME planète (pas en transit) — TOUTE la
+  // patrouille CSI est figée (pas un seul de ses vaisseaux), avec un
+  // choix différent (pas de négociation possible avec le CSI, mais
+  // tenter de passer inaperçu). Tourne AVANT le réassignement des
+  // flottes NPC à quai (étape 2) pour ne pas laisser une patrouille CSI
+  // repartir avant d'avoir eu la chance d'être détectée.
   const idleCsiNpc = ships.filter(
     (s) => s.is_npc && s.faction === "csi" && !s.damaged && !s.encounter_pending && !currentPosition(s, now).traveling,
   );
@@ -201,12 +225,13 @@ export async function GET() {
     const csiHere = idleCsiNpc.find((npc) => nearestPlanet(currentPosition(npc, now).x, currentPosition(npc, now).y).name === planet.name);
     if (!csiHere) continue;
 
+    const enemyFleetShips = ships.filter((s) => s.fleet_id === csiHere.fleet_id);
     const fleetShips = ships.filter((s) => s.fleet_id === ship.fleet_id);
     const [fleetRow] = await db.sql<{ kills: number; losses: number }>`
       select kills, losses from fleets where id = ${ship.fleet_id}::uuid
     `;
-    const strength = fleetStrength(fleetShips, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0);
-    const winChance = rollEncounterOdds(strength);
+    const grouped = groupedFleetStrength(fleetShips, ship.id, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0, now);
+    const winChance = rollEncounterOdds(grouped.strength, difficulty.csi);
     const encounterAtIso = new Date(now).toISOString();
 
     await db.sql`
@@ -214,6 +239,7 @@ export async function GET() {
       set encounter_pending = true, encounter_at = ${encounterAtIso}, encounter_win_chance = ${winChance},
           encounter_x = ${pos.x}, encounter_y = ${pos.y}, encounter_enemy_faction = ${csiHere.faction},
           encounter_npc_ship_id = ${csiHere.id}::uuid, encounter_kind = 'ground',
+          encounter_friendly_count = ${grouped.count}, encounter_enemy_count = ${enemyFleetShips.length},
           updated_at = now()
       where id = ${ship.id}::uuid
     `;
@@ -225,40 +251,56 @@ export async function GET() {
     ship.encounter_kind = "ground";
     ship.encounter_x = pos.x;
     ship.encounter_y = pos.y;
+    ship.encounter_friendly_count = grouped.count;
+    ship.encounter_enemy_count = enemyFleetShips.length;
 
-    await db.sql`
-      update ships
-      set encounter_pending = true, encounter_at = ${encounterAtIso},
-          encounter_x = ${pos.x}, encounter_y = ${pos.y}, encounter_kind = 'ground',
-          updated_at = now()
-      where id = ${csiHere.id}::uuid
-    `;
-    csiHere.encounter_pending = true;
-    csiHere.encounter_at = encounterAtIso;
-    csiHere.encounter_x = pos.x;
-    csiHere.encounter_y = pos.y;
-    const idx = idleCsiNpc.indexOf(csiHere);
-    if (idx !== -1) idleCsiNpc.splice(idx, 1);
+    for (const npcShip of enemyFleetShips) {
+      await db.sql`
+        update ships
+        set encounter_pending = true, encounter_at = ${encounterAtIso},
+            encounter_x = ${pos.x}, encounter_y = ${pos.y}, encounter_kind = 'ground',
+            updated_at = now()
+        where id = ${npcShip.id}::uuid
+      `;
+      npcShip.encounter_pending = true;
+      npcShip.encounter_at = encounterAtIso;
+      npcShip.encounter_x = pos.x;
+      npcShip.encounter_y = pos.y;
+      npcShip.encounter_kind = "ground";
+      const idx = idleCsiNpc.indexOf(npcShip);
+      if (idx !== -1) idleCsiNpc.splice(idx, 1);
+    }
   }
 
-  // 2) flottes NPC à quai : reprennent la route vers une planète de leur
-  // propre clan (jamais hors de leur territoire) — sauf si elles viennent
-  // d'être figées dans une rencontre au sol à l'instant (étape 1)
-  for (const ship of ships) {
-    if (!ship.is_npc) continue;
-    const pos = currentPosition(ship, now);
-    if (pos.traveling || ship.damaged || ship.encounter_pending) continue;
-    if (
-      ship.action_ends_at &&
-      ship.action_started_at &&
-      new Date(ship.action_started_at).getTime() <= now &&
-      new Date(ship.action_ends_at).getTime() > now
-    ) {
-      continue;
-    }
+  // 2) patrouilles NPC à quai : reprennent la route vers une planète de
+  // leur propre clan (jamais hors de leur territoire), TOUS LEURS
+  // VAISSEAUX à la fois (même trajet, même horaire) pour rester groupés
+  // — sauf si elles viennent d'être figées dans une rencontre au sol à
+  // l'instant (étape 1). Ne repart que si TOUTE la patrouille est
+  // disponible (sinon elle attend que le dernier vaisseau se libère).
+  const npcFleetIdsForWander = [...new Set(ships.filter((s) => s.is_npc).map((s) => s.fleet_id))];
+  for (const fleetId of npcFleetIdsForWander) {
+    const fleetShips = ships.filter((s) => s.fleet_id === fleetId);
+    if (fleetShips.length === 0) continue;
+    const allIdle = fleetShips.every((s) => {
+      const pos = currentPosition(s, now);
+      if (pos.traveling || s.damaged || s.encounter_pending) return false;
+      if (
+        s.action_ends_at &&
+        s.action_started_at &&
+        new Date(s.action_started_at).getTime() <= now &&
+        new Date(s.action_ends_at).getTime() > now
+      ) {
+        return false;
+      }
+      return true;
+    });
+    if (!allIdle) continue;
 
+    const leader = fleetShips[0];
+    const pos = currentPosition(leader, now);
     const originPlanet = nearestPlanet(pos.x, pos.y);
-    const route = pickNpcRoute(ship.faction, originPlanet.name);
+    const route = pickNpcRoute(leader.faction, originPlanet.name);
     if (!route) continue;
     const { destination: dest, path: routePath } = route;
     const firstHop = routePath[0];
@@ -269,30 +311,32 @@ export async function GET() {
     ];
     const { departedAt, arrivalAt } = planTravelAlongPath(waypoints);
 
-    await db.sql`
-      update ships
-      set x = ${pos.x}, y = ${pos.y}, dest_x = ${dest.x}, dest_y = ${dest.y}, dest_planet = ${dest.name},
-          path = ${JSON.stringify(waypoints)}::jsonb,
-          departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
-          updated_at = now()
-      where id = ${ship.id}::uuid
-    `;
-    ship.x = pos.x;
-    ship.y = pos.y;
-    ship.dest_x = dest.x;
-    ship.dest_y = dest.y;
-    ship.dest_planet = dest.name;
-    ship.path = waypoints;
-    ship.departed_at = departedAt.toISOString();
-    ship.arrival_at = arrivalAt.toISOString();
+    for (const ship of fleetShips) {
+      await db.sql`
+        update ships
+        set x = ${pos.x}, y = ${pos.y}, dest_x = ${dest.x}, dest_y = ${dest.y}, dest_planet = ${dest.name},
+            path = ${JSON.stringify(waypoints)}::jsonb,
+            departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
+            updated_at = now()
+        where id = ${ship.id}::uuid
+      `;
+      ship.x = pos.x;
+      ship.y = pos.y;
+      ship.dest_x = dest.x;
+      ship.dest_y = dest.y;
+      ship.dest_planet = dest.name;
+      ship.path = waypoints;
+      ship.departed_at = departedAt.toISOString();
+      ship.arrival_at = arrivalAt.toISOString();
+    }
   }
 
   // 2.5) poursuites en cours (voir POST /api/ships/[id]/chase) : un
-  // chasseur rattrape sa cible s'il s'en approche à moins de
-  // CHASE_CATCH_RADIUS — ce qui déclenche la rencontre. Sinon, s'il vise
-  // déjà la bonne destination (celle où va la cible en ce moment), on ne
-  // touche à rien ; sinon on réoriente la poursuite (la cible a changé de
-  // cap, ex: elle vient de reprendre une route au hasard à l'étape 2).
+  // chasseur rattrape sa cible — et donc TOUTE sa patrouille — s'il s'en
+  // approche à moins de CHASE_CATCH_RADIUS. Sinon, s'il vise déjà la
+  // bonne destination (celle où va la cible en ce moment), on ne touche
+  // à rien ; sinon on réoriente la poursuite (la cible a changé de cap,
+  // ex: elle vient de reprendre une route au hasard à l'étape 2).
   const chasers = ships.filter((s) => !s.is_npc && s.chase_target_id && !s.damaged && !s.encounter_pending);
   for (const ship of chasers) {
     const target = ships.find((s) => s.id === ship.chase_target_id);
@@ -307,12 +351,13 @@ export async function GET() {
     const dist = Math.hypot(targetPos.x - shipPos.x, targetPos.y - shipPos.y);
 
     if (dist <= CHASE_CATCH_RADIUS) {
+      const enemyFleetShips = ships.filter((s) => s.fleet_id === target.fleet_id);
       const fleetShips = ships.filter((s) => s.fleet_id === ship.fleet_id);
       const [fleetRow] = await db.sql<{ kills: number; losses: number }>`
         select kills, losses from fleets where id = ${ship.fleet_id}::uuid
       `;
-      const strength = fleetStrength(fleetShips, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0);
-      const winChance = rollEncounterOdds(strength);
+      const grouped = groupedFleetStrength(fleetShips, ship.id, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0, now);
+      const winChance = rollEncounterOdds(grouped.strength, difficulty[target.faction as "csi" | "mandalore" | "cartel"]);
       const encounterAtIso = new Date(now).toISOString();
 
       await db.sql`
@@ -320,6 +365,7 @@ export async function GET() {
         set encounter_pending = true, encounter_at = ${encounterAtIso}, encounter_win_chance = ${winChance},
             encounter_x = ${shipPos.x}, encounter_y = ${shipPos.y}, encounter_enemy_faction = ${target.faction},
             encounter_npc_ship_id = ${target.id}::uuid, encounter_kind = 'chase', chase_target_id = null,
+            encounter_friendly_count = ${grouped.count}, encounter_enemy_count = ${enemyFleetShips.length},
             updated_at = now()
         where id = ${ship.id}::uuid
       `;
@@ -330,17 +376,21 @@ export async function GET() {
       ship.encounter_npc_ship_id = target.id;
       ship.encounter_kind = "chase";
       ship.chase_target_id = null;
+      ship.encounter_friendly_count = grouped.count;
+      ship.encounter_enemy_count = enemyFleetShips.length;
 
-      await db.sql`
-        update ships
-        set encounter_pending = true, encounter_at = ${encounterAtIso},
-            encounter_x = ${targetPos.x}, encounter_y = ${targetPos.y}, encounter_kind = 'chase',
-            updated_at = now()
-        where id = ${target.id}::uuid
-      `;
-      target.encounter_pending = true;
-      target.encounter_at = encounterAtIso;
-      target.encounter_kind = "chase";
+      for (const npcShip of enemyFleetShips) {
+        await db.sql`
+          update ships
+          set encounter_pending = true, encounter_at = ${encounterAtIso},
+              encounter_x = ${targetPos.x}, encounter_y = ${targetPos.y}, encounter_kind = 'chase',
+              updated_at = now()
+          where id = ${npcShip.id}::uuid
+        `;
+        npcShip.encounter_pending = true;
+        npcShip.encounter_at = encounterAtIso;
+        npcShip.encounter_kind = "chase";
+      }
       continue;
     }
 
@@ -374,12 +424,18 @@ export async function GET() {
   }
 
   // 3) rencontres réelles : un vaisseau République en transit qui croise
-  // un NPC en transit (distance < ENCOUNTER_PROXIMITY) déclenche une
-  // rencontre — les DEUX vaisseaux sont figés à leur position actuelle
-  // tant qu'elle n'est pas résolue (le NPC ne peut pas non plus bouger).
-  const npcTraveling = ships.filter(
+  // une patrouille NPC en transit (distance < ENCOUNTER_PROXIMITY)
+  // déclenche une rencontre contre TOUTE cette patrouille — un seul
+  // représentant par patrouille suffit à détecter la proximité, puisque
+  // tous ses vaisseaux voyagent groupés, à la même position.
+  const npcTravelingAll = ships.filter(
     (s) => s.is_npc && !s.encounter_pending && currentPosition(s, now).traveling,
   );
+  const npcTravelingByFleet = new Map<string, ShipRow>();
+  for (const s of npcTravelingAll) {
+    if (!npcTravelingByFleet.has(s.fleet_id)) npcTravelingByFleet.set(s.fleet_id, s);
+  }
+  const npcTraveling = [...npcTravelingByFleet.values()];
   const republicShips = ships.filter(
     (s) => !s.is_npc && s.faction === "republique" && !s.damaged && !s.encounter_pending,
   );
@@ -400,12 +456,13 @@ export async function GET() {
     }
     if (!closest) continue;
 
+    const enemyFleetShips = ships.filter((s) => s.fleet_id === closest!.fleet_id);
     const fleetShips = ships.filter((s) => s.fleet_id === ship.fleet_id);
     const [fleetRow] = await db.sql<{ kills: number; losses: number }>`
       select kills, losses from fleets where id = ${ship.fleet_id}::uuid
     `;
-    const strength = fleetStrength(fleetShips, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0);
-    const winChance = rollEncounterOdds(strength);
+    const grouped = groupedFleetStrength(fleetShips, ship.id, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0, now);
+    const winChance = rollEncounterOdds(grouped.strength, difficulty[closest.faction as "csi" | "mandalore" | "cartel"]);
     const encounterAtIso = new Date(now).toISOString();
     const npcPos = currentPosition(closest, now);
 
@@ -414,6 +471,7 @@ export async function GET() {
       set encounter_pending = true, encounter_at = ${encounterAtIso}, encounter_win_chance = ${winChance},
           encounter_x = ${pos.x}, encounter_y = ${pos.y}, encounter_enemy_faction = ${closest.faction},
           encounter_npc_ship_id = ${closest.id}::uuid, encounter_kind = 'transit',
+          encounter_friendly_count = ${grouped.count}, encounter_enemy_count = ${enemyFleetShips.length},
           updated_at = now()
       where id = ${ship.id}::uuid
     `;
@@ -423,18 +481,23 @@ export async function GET() {
     ship.encounter_enemy_faction = closest.faction;
     ship.encounter_npc_ship_id = closest.id;
     ship.encounter_kind = "transit";
+    ship.encounter_friendly_count = grouped.count;
+    ship.encounter_enemy_count = enemyFleetShips.length;
 
-    // le vaisseau NPC croisé est lui aussi figé, à la même heure, tant
-    // que le joueur République n'a pas tranché
-    await db.sql`
-      update ships
-      set encounter_pending = true, encounter_at = ${encounterAtIso},
-          encounter_x = ${npcPos.x}, encounter_y = ${npcPos.y}, encounter_kind = 'transit',
-          updated_at = now()
-      where id = ${closest.id}::uuid
-    `;
-    closest.encounter_pending = true;
-    closest.encounter_at = encounterAtIso;
+    // toute la patrouille NPC croisée est elle aussi figée, à la même
+    // heure, tant que le joueur République n'a pas tranché
+    for (const npcShip of enemyFleetShips) {
+      await db.sql`
+        update ships
+        set encounter_pending = true, encounter_at = ${encounterAtIso},
+            encounter_x = ${npcPos.x}, encounter_y = ${npcPos.y}, encounter_kind = 'transit',
+            updated_at = now()
+        where id = ${npcShip.id}::uuid
+      `;
+      npcShip.encounter_pending = true;
+      npcShip.encounter_at = encounterAtIso;
+      npcShip.encounter_kind = "transit";
+    }
     // retiré de la liste des cibles disponibles pour ce même passage
     const idx = npcTraveling.indexOf(closest);
     if (idx !== -1) npcTraveling.splice(idx, 1);
@@ -457,13 +520,18 @@ export async function GET() {
     const won = rollCombatWin(penalizedChance);
     const npcId = ship.encounter_npc_ship_id;
 
+    let npcFleetId: string | null = null;
     if (npcId) {
-      await db.sql`
-        update ships
-        set encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
-            encounter_kind = null, updated_at = now()
-        where id = ${npcId}::uuid
-      `;
+      const [npc] = await db.sql<{ fleet_id: string }>`select fleet_id from ships where id = ${npcId}::uuid`;
+      npcFleetId = npc?.fleet_id ?? null;
+      if (npcFleetId) {
+        await db.sql`
+          update ships
+          set encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
+              encounter_kind = null, updated_at = now()
+          where fleet_id = ${npcFleetId}::uuid
+        `;
+      }
     }
 
     if (won) {
@@ -471,20 +539,18 @@ export async function GET() {
         update ships
         set encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
             encounter_win_chance = null, encounter_enemy_faction = null, encounter_npc_ship_id = null,
-            encounter_kind = null, updated_at = now()
+            encounter_kind = null, encounter_friendly_count = null, encounter_enemy_count = null,
+            updated_at = now()
         where id = ${ship.id}::uuid
       `;
       await db.sql`update fleets set kills = kills + 1, updated_at = now() where id = ${ship.fleet_id}::uuid`;
-      if (npcId) {
-        const [npc] = await db.sql<{ fleet_id: string }>`select fleet_id from ships where id = ${npcId}::uuid`;
-        await db.sql`delete from ships where id = ${npcId}::uuid`;
-        if (npc) {
-          const respawnAt = new Date(now + NPC_RESPAWN_SECONDS * 1000).toISOString();
-          await db.sql`
-            update fleets set losses = losses + 1, respawn_at = ${respawnAt}, updated_at = now()
-            where id = ${npc.fleet_id}::uuid
-          `;
-        }
+      if (npcFleetId) {
+        await db.sql`delete from ships where fleet_id = ${npcFleetId}::uuid`;
+        const respawnAt = new Date(now + NPC_RESPAWN_SECONDS * 1000).toISOString();
+        await db.sql`
+          update fleets set losses = losses + 1, respawn_at = ${respawnAt}, updated_at = now()
+          where id = ${npcFleetId}::uuid
+        `;
       }
     } else {
       const originPlanet = nearestPlanet(frozenPos.x, frozenPos.y);
@@ -507,7 +573,8 @@ export async function GET() {
               damaged = true,
               encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
               encounter_win_chance = null, encounter_enemy_faction = null, encounter_npc_ship_id = null,
-              encounter_kind = null, updated_at = now()
+              encounter_kind = null, encounter_friendly_count = null, encounter_enemy_count = null,
+              updated_at = now()
           where id = ${ship.id}::uuid
         `;
       }
@@ -515,18 +582,19 @@ export async function GET() {
     }
   }
 
-  // 5) le CSI tente de reprendre les planètes qu'il a perdues (> 50%
-  // d'influence République) : une attaque est d'abord annoncée
-  // (csi_attack_at, clignote rouge sur la carte) puis résolue après ce
-  // délai — une victoire CSI reprend d'un coup CSI_COUNTERATTACK_
-  // INFLUENCE_GAIN points, bien plus qu'une victoire République
-  // (+1 seulement).
+  // 5) le CSI tente de reprendre les planètes qu'il a perdues (> 10%
+  // d'influence République — la CSI ne tolère qu'un pied-à-terre
+  // minime) : une attaque est d'abord annoncée (csi_attack_at, clignote
+  // rouge sur la carte) puis résolue après ce délai — une victoire CSI
+  // reprend d'un coup CSI_COUNTERATTACK_INFLUENCE_GAIN points, plafonnée
+  // à 10% (elle continue de retenter tant que ce n'est pas redescendu à
+  // 10% ou moins), bien plus qu'une victoire République (+7 seulement).
   const contestedPlanets = await db.sql<{
     planet_name: string;
     republic_pct: number;
     csi_attack_at: string | null;
   }>`
-    select planet_name, republic_pct, csi_attack_at from planet_influence where republic_pct > 50
+    select planet_name, republic_pct, csi_attack_at from planet_influence where republic_pct > 10
   `;
   for (const row of contestedPlanets) {
     const planet = PLANETS.find((p) => p.name === row.planet_name);
@@ -554,13 +622,13 @@ export async function GET() {
     const [fleetRow] = await db.sql<{ kills: number; losses: number }>`
       select kills, losses from fleets where id = ${attackerFleetId}::uuid
     `;
-    const strength = fleetStrength(attackerShips, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0);
+    const strength = fleetStrength(attackerShips, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0) * difficulty.csi;
     const won = rollCombatWin(rollEncounterOdds(strength));
 
     if (won) {
       await db.sql`
         update planet_influence
-        set republic_pct = greatest(0, republic_pct - ${CSI_COUNTERATTACK_INFLUENCE_GAIN}), csi_attack_at = null, updated_at = now()
+        set republic_pct = greatest(10, republic_pct - ${CSI_COUNTERATTACK_INFLUENCE_GAIN}), csi_attack_at = null, updated_at = now()
         where planet_name = ${row.planet_name}
       `;
       await db.sql`update fleets set kills = kills + 1, updated_at = now() where id = ${attackerFleetId}::uuid`;

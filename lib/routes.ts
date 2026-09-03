@@ -34,6 +34,7 @@ function computeNearestNeighbourEdges(): RouteEdge[] {
 const MANUAL_ROUTE_NAMES: [string, string][] = [
   ["Zanbar", "Ruusan"],
   ["Hypori", "Dathomir"],
+  ["Sullust", "Devaron"],
 ];
 
 export const ROUTE_EDGES: RouteEdge[] = [

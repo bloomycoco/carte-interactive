@@ -101,34 +101,39 @@ export async function POST(
       ? { x: ship.encounter_x, y: ship.encounter_y }
       : positionAt(ship.path!, new Date(ship.departed_at!), new Date(ship.arrival_at!), encounterAt);
 
-  // le vaisseau NPC croisé redevient libre de reprendre sa route — sauf
-  // en cas de victoire au combat, où il est détruit (voir destroyNpc)
+  // TOUTE la patrouille NPC croisée (pas un seul de ses vaisseaux)
+  // redevient libre de reprendre sa route — sauf en cas de victoire au
+  // combat, où elle est détruite en entier (voir destroyNpc)
   async function releaseNpc() {
     if (!ship!.encounter_npc_ship_id) return;
+    const [npc] = await db.sql<{ fleet_id: string }>`
+      select fleet_id from ships where id = ${ship!.encounter_npc_ship_id}::uuid
+    `;
+    if (!npc) return;
     await db.sql`
       update ships
       set encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
           encounter_kind = null, updated_at = now()
-      where id = ${ship!.encounter_npc_ship_id}::uuid
+      where fleet_id = ${npc.fleet_id}::uuid
     `;
   }
 
-  // victoire au combat : le vaisseau NPC est détruit, retiré de la carte
-  // — sa flotte n'est pas supprimée, elle réapparaîtra dans
-  // NPC_RESPAWN_SECONDS (voir le tick dans GET /api/ships)
+  // victoire au combat : TOUTE la patrouille NPC (pas un seul vaisseau)
+  // est détruite, retirée de la carte — sa flotte n'est pas supprimée,
+  // elle réapparaîtra dans NPC_RESPAWN_SECONDS (voir le tick dans
+  // GET /api/ships)
   async function destroyNpc() {
     if (!ship!.encounter_npc_ship_id) return;
     const [npc] = await db.sql<{ fleet_id: string }>`
       select fleet_id from ships where id = ${ship!.encounter_npc_ship_id}::uuid
     `;
-    await db.sql`delete from ships where id = ${ship!.encounter_npc_ship_id}::uuid`;
-    if (npc) {
-      const respawnAt = new Date(Date.now() + NPC_RESPAWN_SECONDS * 1000).toISOString();
-      await db.sql`
-        update fleets set losses = losses + 1, respawn_at = ${respawnAt}, updated_at = now()
-        where id = ${npc.fleet_id}::uuid
-      `;
-    }
+    if (!npc) return;
+    await db.sql`delete from ships where fleet_id = ${npc.fleet_id}::uuid`;
+    const respawnAt = new Date(Date.now() + NPC_RESPAWN_SECONDS * 1000).toISOString();
+    await db.sql`
+      update fleets set losses = losses + 1, respawn_at = ${respawnAt}, updated_at = now()
+      where id = ${npc.fleet_id}::uuid
+    `;
   }
 
   async function resume(outcome: "won" | "negotiated" | "sneaked") {
@@ -145,6 +150,7 @@ export async function POST(
       set departed_at = ${newDeparted.toISOString()}, arrival_at = ${newArrival.toISOString()},
           encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
           encounter_win_chance = null, encounter_enemy_faction = null, encounter_npc_ship_id = null,
+          encounter_friendly_count = null, encounter_enemy_count = null,
           encounter_kind = null, updated_at = now()
       where id = ${id}::uuid
       returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,
@@ -182,6 +188,7 @@ export async function POST(
           damaged = true,
           encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
           encounter_win_chance = null, encounter_enemy_faction = null, encounter_npc_ship_id = null,
+          encounter_friendly_count = null, encounter_enemy_count = null,
           encounter_kind = null, updated_at = now()
       where id = ${id}::uuid
       returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,
@@ -219,6 +226,7 @@ export async function POST(
             departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
             encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
             encounter_win_chance = null, encounter_enemy_faction = null, encounter_npc_ship_id = null,
+          encounter_friendly_count = null, encounter_enemy_count = null,
             encounter_kind = null, updated_at = now()
         where id = ${id}::uuid
         returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,
@@ -254,6 +262,7 @@ export async function POST(
           departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
           encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
           encounter_win_chance = null, encounter_enemy_faction = null, encounter_npc_ship_id = null,
+          encounter_friendly_count = null, encounter_enemy_count = null,
           encounter_kind = null, updated_at = now()
       where id = ${id}::uuid
       returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,

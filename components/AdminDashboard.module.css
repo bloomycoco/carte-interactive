@@ -100,6 +100,12 @@
 }
 .inlineForm input:focus, .inlineForm select:focus { border-color: var(--signal); outline: none; }
 .coordInput, .codeInput { width: 120px; }
+
+.difficultyList { display: flex; flex-direction: column; gap: 10px; }
+.difficultyRow { display: flex; align-items: center; gap: 12px; }
+.difficultyRow .factionTag { min-width: 92px; }
+.difficultySlider { flex: 1; max-width: 260px; accent-color: var(--signal); }
+.difficultyValue { min-width: 3.5rem; text-align: right; color: var(--star); font-weight: 600; }
 .inlineForm button {
   background: rgba(185, 139, 224, 0.15);
   border: 1px solid var(--signal);

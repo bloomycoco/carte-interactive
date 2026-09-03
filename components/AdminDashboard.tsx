@@ -92,6 +92,48 @@ export default function AdminDashboard({ role }: { role: Role }) {
 
   const [respawningNpc, setRespawningNpc] = useState(false);
 
+  const [difficulty, setDifficulty] = useState<Record<NpcFaction, number> | null>(null);
+  const [savingDifficulty, setSavingDifficulty] = useState<NpcFaction | null>(null);
+
+  const loadDifficulty = useCallback(async () => {
+    try {
+      const data = await jsonOrThrow(await fetch("/api/admin/npc-difficulty"));
+      const next: Record<NpcFaction, number> = { csi: 1, mandalore: 1, cartel: 1 };
+      for (const row of data.difficulty as { faction: NpcFaction; multiplier: number }[]) {
+        next[row.faction] = row.multiplier;
+      }
+      setDifficulty(next);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    async function run() {
+      await loadDifficulty();
+    }
+    void run();
+  }, [loadDifficulty]);
+
+  async function setFactionDifficulty(faction: NpcFaction, multiplier: number) {
+    setError(null);
+    setSavingDifficulty(faction);
+    try {
+      await jsonOrThrow(
+        await fetch("/api/admin/npc-difficulty", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ faction, multiplier }),
+        }),
+      );
+      setDifficulty((prev) => (prev ? { ...prev, [faction]: multiplier } : prev));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingDifficulty(null);
+    }
+  }
+
   const loadFleets = useCallback(async () => {
     try {
       const data = await jsonOrThrow(await fetch("/api/admin/fleets"));
@@ -449,6 +491,50 @@ export default function AdminDashboard({ role }: { role: Role }) {
           vaisseau (peut recevoir des ordres). Un joueur peut avoir l&apos;un, l&apos;autre, ou les deux.
         </p>
       </section>
+
+      {isOwner && (
+        <section className={styles.section}>
+          <h2>Difficulté des camps NPC</h2>
+          <p className={styles.hint}>
+            Multiplie la force de combat d&apos;un camp entier (rencontres, contre-attaques, attaques
+            de planète) — au-delà de ×1.0 ce camp devient plus dur à affronter, en dessous plus
+            facile. De quoi freiner la République à la volée si elle écrase tout le monde, ou
+            relâcher la pression si la guerre s&apos;enlise.
+          </p>
+          {!difficulty ? (
+            <p className={styles.hint}>Chargement…</p>
+          ) : (
+            <div className={styles.difficultyList}>
+              {(["csi", "mandalore", "cartel"] as NpcFaction[]).map((faction) => (
+                <div key={faction} className={styles.difficultyRow}>
+                  <span data-faction={faction} className={styles.factionTag}>
+                    {FACTION_LABEL[faction]}
+                  </span>
+                  <input
+                    type="range"
+                    className={styles.difficultySlider}
+                    min={0.2}
+                    max={5}
+                    step={0.1}
+                    value={difficulty[faction]}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      setDifficulty((prev) => (prev ? { ...prev, [faction]: v } : prev));
+                    }}
+                    onMouseUp={(e) => setFactionDifficulty(faction, Number((e.target as HTMLInputElement).value))}
+                    onTouchEnd={(e) => setFactionDifficulty(faction, Number((e.target as HTMLInputElement).value))}
+                    onKeyUp={(e) => setFactionDifficulty(faction, Number((e.target as HTMLInputElement).value))}
+                  />
+                  <span className={styles.difficultyValue}>
+                    ×{difficulty[faction].toFixed(1)}
+                    {savingDifficulty === faction ? "…" : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {isOwner && (
         <section className={styles.section}>
