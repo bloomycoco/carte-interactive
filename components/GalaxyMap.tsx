@@ -383,7 +383,20 @@ export default function GalaxyMap() {
         ? { originPlanet: live.quest_origin_planet, targetPlanet: live.quest_target_planet, phase: live.quest_phase }
         : null;
     const action = availablePlanetAction(planet.name, planet.faction, unlocked.faction, quest);
-    return action ? { planet, action } : null;
+    if (!action) return null;
+    // un seul vaisseau à la fois peut répandre l'influence sur une même
+    // planète — masque le bouton si un autre s'en charge déjà
+    if (action === "influence") {
+      const alreadyInfluencing = ships.some(
+        (s) =>
+          s.id !== live.id &&
+          s.dest_planet === planet.name &&
+          s.action_type === "influence" &&
+          isActionActive(s, now),
+      );
+      if (alreadyInfluencing) return null;
+    }
+    return { planet, action };
   }
 
   async function triggerAction(shipId: string, type: PlanetAction) {

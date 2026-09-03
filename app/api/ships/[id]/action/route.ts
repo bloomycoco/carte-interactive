@@ -166,7 +166,21 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
     return NextResponse.json({ ok: true, type, planet: planet.name, ship: updated[0] });
   }
 
-  // propagation d'influence : immobilise le vaisseau 15 minutes
+  // propagation d'influence : immobilise le vaisseau 15 minutes — un seul
+  // vaisseau à la fois peut répandre l'influence sur une même planète
+  const [concurrent] = await db.sql<{ id: string }>`
+    select id from ships
+    where action_type = 'influence' and action_started_at <= now() and action_ends_at > now()
+      and dest_planet = ${planet.name} and id != ${id}::uuid
+    limit 1
+  `;
+  if (concurrent) {
+    return NextResponse.json(
+      { error: `un autre vaisseau répand déjà l'influence sur ${planet.name}` },
+      { status: 400 },
+    );
+  }
+
   const startedAt = new Date();
   const endsAt = new Date(startedAt.getTime() + INFLUENCE_DURATION_SECONDS * 1000);
 

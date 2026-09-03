@@ -18,6 +18,7 @@ import {
   type Waypoint,
 } from "@/lib/fleets";
 import { nearestPlanet, shortestPath } from "@/lib/routes";
+import { PLANETS } from "@/lib/planets";
 import { fleetStrength } from "@/lib/ship-classes";
 
 type ShipRow = {
@@ -208,7 +209,13 @@ export async function GET() {
       // déjà en route vers cette menace précise : on ne réinitialise pas
       // sa progression, il n'y a rien à faire de plus ce passage-ci
       if (ship.dest_planet !== closest.planet.name) {
-        const originPlanet = nearestPlanet(pos.x, pos.y);
+        // un vaisseau déjà en vol continue d'abord vers sa destination
+        // actuelle (plutôt que de se re-caler sur la planète la plus
+        // proche à vol d'oiseau) — sinon, s'il se trouve entre deux
+        // planètes, le nouveau trajet peut repartir en arrière à travers
+        // celle qu'il vient tout juste de dépasser
+        const originPlanet =
+          (pos.traveling && PLANETS.find((p) => p.name === ship.dest_planet)) || nearestPlanet(pos.x, pos.y);
         const routePath = planNpcRouteTo(ship.faction, originPlanet.name, closest.planet.name);
         if (routePath) {
           const dest = closest.planet;
