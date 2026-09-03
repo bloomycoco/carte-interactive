@@ -316,6 +316,9 @@ export default function GalaxyMap() {
   }
 
   const [resolvingEncounter, setResolvingEncounter] = useState(false);
+  const [attackResult, setAttackResult] = useState<
+    { shipName: string; planet: string; outcome: "won" | "lost"; winChance: number } | null
+  >(null);
 
   // une flotte ennemie a été croisée par un vaisseau qu'on contrôle et
   // attend une décision (combattre / fuir)
@@ -418,16 +421,21 @@ export default function GalaxyMap() {
       if (data.ship) {
         setShips((prev) => prev.map((s) => (s.id === shipId ? { ...s, ...data.ship } : s)));
       }
+      if (type === "attack") {
+        setAttackResult({
+          shipName: unlocked.name,
+          planet: data.planet,
+          outcome: data.outcome,
+          winChance: data.winChance,
+        });
+        return;
+      }
       const msg =
         type === "humanitarian"
           ? `${unlocked.name} part chercher des vivres sur ${data.target} pour l'aide humanitaire à ${data.planet}.`
           : type === "humanitarian_pickup"
             ? `${unlocked.name} récupère les vivres et repart vers ${data.origin}.`
-            : type === "humanitarian_deliver"
-              ? `${unlocked.name} livre l'aide humanitaire à ${data.planet}. Mission accomplie !`
-              : data.outcome === "won"
-                ? `${unlocked.name} remporte l'attaque sur ${data.planet} ! La flotte gagne en puissance.`
-                : `${unlocked.name} échoue son attaque sur ${data.planet}. L'ennemi en ressort renforcé.`;
+            : `${unlocked.name} livre l'aide humanitaire à ${data.planet}. Mission accomplie !`;
       setFleetNotice(msg);
     } catch {
       setFleetNotice("erreur réseau");
@@ -959,6 +967,33 @@ export default function GalaxyMap() {
               Fuir est sans risque mais annule le trajet et ramène le vaisseau d&apos;où il venait.
               Combattre et perdre endommage le vaisseau et le force à rallier Coruscant.
             </p>
+          </div>
+        </div>
+      )}
+
+      {attackResult && (
+        <div className={styles.encounterOverlay}>
+          <div
+            className={`${styles.encounterModal} ${styles.attackModal} ${
+              attackResult.outcome === "won" ? styles.won : ""
+            }`}
+          >
+            <div className={`${styles.encounterTitle} ${styles.attackTitle} ${attackResult.outcome === "won" ? styles.won : ""}`}>
+              {attackResult.outcome === "won" ? "Victoire !" : "Attaque repoussée"}
+            </div>
+            <p className={styles.encounterText}>
+              <strong>{attackResult.shipName}</strong> lance l&apos;assaut sur {attackResult.planet}
+              {" — "}
+              {attackResult.outcome === "won"
+                ? "l'attaque réussit ! La flotte gagne en puissance."
+                : "l'attaque échoue. L'ennemi en ressort renforcé."}
+            </p>
+            <p className={styles.encounterOdds}>
+              Chances de victoire annoncées : <strong>{attackResult.winChance}%</strong>
+            </p>
+            <button className={styles.attackClose} onClick={() => setAttackResult(null)}>
+              Fermer
+            </button>
           </div>
         </div>
       )}
