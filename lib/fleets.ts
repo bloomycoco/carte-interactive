@@ -32,6 +32,11 @@ function randomFraction() {
 // GET /api/ships), pas un tirage abstrait.
 export const ENCOUNTER_PROXIMITY = 120;
 
+// En dessous de ce nombre de vaisseaux (toute la flotte, rassemblée sur
+// place), une attaque de planète ne peut JAMAIS réussir — quelle que
+// soit sa force.
+export const MIN_ATTACK_FLEET_SIZE = 4;
+
 // Force ennemie aléatoire (min/max) : comparable à une flotte modeste
 // de 1 à 2 vaisseaux moyens, pour que les chances restent disputées.
 const ENEMY_STRENGTH_MIN = 4;

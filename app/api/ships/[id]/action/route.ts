@@ -6,6 +6,7 @@ import {
   planTravelAlongPath,
   rollCombatWin,
   rollEncounterOdds,
+  MIN_ATTACK_FLEET_SIZE,
   type Waypoint,
 } from "@/lib/fleets";
 import { nearestPlanet, shortestPath } from "@/lib/routes";
@@ -18,10 +19,14 @@ import { fleetStrength } from "@/lib/ship-classes";
 //   départ vers une planète tirée au sort (toujours lointaine),
 //   récupération des vivres sur place, puis retour les livrer sur le
 //   monde d'origine ;
+// - reconnaissance (monde d'un clan ennemi) : révèle les chances de
+//   victoire d'une attaque SANS rien engager (juste informatif) ;
 // - attaquer la planète (monde d'un clan ennemi) : résolu immédiatement,
 //   mais seulement si TOUTE la flotte (chaque vaisseau) est rassemblée
-//   sur place — une victoire renforce la flotte (kills, comme un combat
-//   gagné), un échec renforce TOUTES les flottes NPC de ce clan.
+//   sur place ET compte au moins MIN_ATTACK_FLEET_SIZE vaisseaux (sinon
+//   échec assuré) — une victoire renforce la flotte (kills) et fait
+//   gagner 1 point d'influence République sur cette planète (jamais
+//   plus), un échec renforce TOUTES les flottes NPC de ce clan.
 // Accessible avec le code DU VAISSEAU.
 export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/action">) {
   const { id } = await ctx.params;
@@ -34,7 +39,8 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
     type !== "humanitarian" &&
     type !== "humanitarian_pickup" &&
     type !== "humanitarian_deliver" &&
-    type !== "attack"
+    type !== "attack" &&
+    type !== "attack_preview"
   ) {
     return NextResponse.json({ error: "action invalide" }, { status: 400 });
   }
@@ -90,7 +96,8 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
       ? { originPlanet: ship.quest_origin_planet, targetPlanet: ship.quest_target_planet, phase: ship.quest_phase }
       : null;
   const available = availablePlanetAction(planet.name, planet.faction, ship.faction as "republique" | "csi" | "mandalore", quest);
-  if (available !== type) {
+  const expected = type === "attack_preview" ? "attack" : type;
+  if (available !== expected) {
     return NextResponse.json(
       { error: `cette action n'est pas disponible sur ${planet.name}` },
       { status: 400 },
@@ -172,8 +179,32 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
     return NextResponse.json({ ok: true, type, planet: planet.name, ship: updated[0] });
   }
 
+  if (type === "attack_preview") {
+    // reconnaissance : une estimation, basée sur toute la flotte, sans
+    // exiger qu'elle soit rassemblée ici — juste informatif, n'engage rien
+    const fleetShipsAll = await db.sql<{ category: string | null }>`
+      select category from ships where fleet_id = ${ship.fleet_id}::uuid
+    `;
+    const [fleetRow] = await db.sql<{ kills: number; losses: number }>`
+      select kills, losses from fleets where id = ${ship.fleet_id}::uuid
+    `;
+    const tooSmall = fleetShipsAll.length < MIN_ATTACK_FLEET_SIZE;
+    const winChance = tooSmall
+      ? 0
+      : rollEncounterOdds(fleetStrength(fleetShipsAll, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0));
+    return NextResponse.json({
+      ok: true,
+      type,
+      planet: planet.name,
+      winChance,
+      fleetSize: fleetShipsAll.length,
+      minFleetSize: MIN_ATTACK_FLEET_SIZE,
+    });
+  }
+
   // attaquer la planète : il faut TOUTE la flotte rassemblée sur place
-  // (chaque vaisseau, idle, sur cette planète) — pas juste celui-ci.
+  // (chaque vaisseau, idle, sur cette planète) — pas juste celui-ci — et
+  // au moins MIN_ATTACK_FLEET_SIZE vaisseaux, sinon échec assuré.
   const fleetShips = await db.sql<{
     id: string;
     category: string | null;
@@ -206,12 +237,20 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
   const [fleetRow] = await db.sql<{ kills: number; losses: number }>`
     select kills, losses from fleets where id = ${ship.fleet_id}::uuid
   `;
+  const tooSmall = fleetShips.length < MIN_ATTACK_FLEET_SIZE;
   const strength = fleetStrength(fleetShips, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0);
-  const winChance = rollEncounterOdds(strength);
-  const won = rollCombatWin(winChance);
+  const winChance = tooSmall ? 0 : rollEncounterOdds(strength);
+  const won = !tooSmall && rollCombatWin(winChance);
 
   if (won) {
     await db.sql`update fleets set kills = kills + 1, updated_at = now() where id = ${ship.fleet_id}::uuid`;
+    // +1 point d'influence République sur cette planète, jamais plus
+    await db.sql`
+      insert into planet_influence (planet_name, republic_pct)
+      values (${planet.name}, 1)
+      on conflict (planet_name) do update
+      set republic_pct = least(100, planet_influence.republic_pct + 1), updated_at = now()
+    `;
   } else {
     // l'attaque échoue : tout le clan visé (pas juste une flotte) en
     // ressort plus fort
@@ -221,5 +260,13 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
     `;
   }
 
-  return NextResponse.json({ ok: true, type, planet: planet.name, outcome: won ? "won" : "lost", winChance });
+  return NextResponse.json({
+    ok: true,
+    type,
+    planet: planet.name,
+    outcome: won ? "won" : "lost",
+    winChance,
+    fleetSize: fleetShips.length,
+    minFleetSize: MIN_ATTACK_FLEET_SIZE,
+  });
 }

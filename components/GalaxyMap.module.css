@@ -546,6 +546,30 @@
 }
 .panel .coords b { color: var(--star); font-weight: 500; }
 
+.influenceGauge {
+  padding-top: 14px;
+  margin-top: 14px;
+  border-top: 1px solid var(--nebula-line);
+}
+.influenceLabel {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--star-dim);
+  margin-bottom: 6px;
+}
+.influenceBar {
+  height: 6px;
+  border-radius: 4px;
+  background: var(--f, var(--separatist));
+  overflow: hidden;
+}
+.influenceFillRepublic {
+  height: 100%;
+  background: var(--republic);
+  transition: width 0.3s ease;
+}
+
 .panelActions {
   display: flex;
   flex-direction: column;

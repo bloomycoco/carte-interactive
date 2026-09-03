@@ -264,5 +264,13 @@ export async function GET() {
     if (idx !== -1) npcTraveling.splice(idx, 1);
   }
 
-  return NextResponse.json({ ships });
+  // influence République cosmétique par planète attaquée (voir
+  // POST /api/ships/[id]/action) — pour teinter la carte et afficher une
+  // jauge au clic sur la planète.
+  const influenceRows = await db.sql<{ planet_name: string; republic_pct: number }>`
+    select planet_name, republic_pct from planet_influence
+  `;
+  const planetInfluence = Object.fromEntries(influenceRows.map((r) => [r.planet_name, r.republic_pct]));
+
+  return NextResponse.json({ ships, planetInfluence });
 }

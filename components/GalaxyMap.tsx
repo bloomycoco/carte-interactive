@@ -67,6 +67,9 @@ export default function GalaxyMap() {
   const [searchOpen, setSearchOpen] = useState(false);
 
   const [ships, setShips] = useState<PublicShip[]>([]);
+  // influence République cosmétique par planète (0-100), clé = nom de la
+  // planète — voir POST /api/ships/[id]/action ("attack")
+  const [planetInfluence, setPlanetInfluence] = useState<Record<string, number>>({});
   const [unlockedFleets, setUnlockedFleets] = useState<UnlockedFleet[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -138,7 +141,10 @@ export default function GalaxyMap() {
       try {
         const res = await fetch("/api/ships");
         const data = await res.json();
-        if (!cancelled && res.ok) setShips(data.ships ?? []);
+        if (!cancelled && res.ok) {
+          setShips(data.ships ?? []);
+          setPlanetInfluence(data.planetInfluence ?? {});
+        }
       } catch {
         // réseau indisponible : on retentera au prochain tick
       }
@@ -319,6 +325,39 @@ export default function GalaxyMap() {
   const [attackResult, setAttackResult] = useState<
     { shipName: string; planet: string; outcome: "won" | "lost"; winChance: number } | null
   >(null);
+  // popup "Attaquer ou Reconnaissance" avant de s'engager dans une
+  // attaque de planète
+  const [attackChoiceFor, setAttackChoiceFor] = useState<
+    { shipId: string; shipName: string; planetName: string } | null
+  >(null);
+  const [reconResult, setReconResult] = useState<
+    { winChance: number; fleetSize: number; minFleetSize: number } | null
+  >(null);
+  const [reconLoading, setReconLoading] = useState(false);
+
+  async function runReconnaissance() {
+    if (!attackChoiceFor) return;
+    const unlocked = unlockedShips.find((u) => u.id === attackChoiceFor.shipId);
+    if (!unlocked) return;
+    setReconLoading(true);
+    try {
+      const res = await fetch(`/api/ships/${attackChoiceFor.shipId}/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: unlocked.code, type: "attack_preview" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFleetNotice(data.error ?? "échec de la reconnaissance");
+        return;
+      }
+      setReconResult({ winChance: data.winChance, fleetSize: data.fleetSize, minFleetSize: data.minFleetSize });
+    } catch {
+      setFleetNotice("erreur réseau");
+    } finally {
+      setReconLoading(false);
+    }
+  }
 
   // une flotte ennemie a été croisée par un vaisseau qu'on contrôle et
   // attend une décision (combattre / fuir)
@@ -442,6 +481,17 @@ export default function GalaxyMap() {
     } finally {
       setTriggeringAction(null);
     }
+  }
+
+  // aide humanitaire / livraison : déclenchées directement ; attaquer :
+  // passe d'abord par le choix Reconnaissance / Attaquer
+  function handlePlanetAction(shipId: string, shipName: string, action: PlanetAction, planetName: string) {
+    if (action === "attack") {
+      setReconResult(null);
+      setAttackChoiceFor({ shipId, shipName, planetName });
+      return;
+    }
+    void triggerAction(shipId, action);
   }
 
   const routes = useMemo(() => {
@@ -708,6 +758,11 @@ export default function GalaxyMap() {
             const meta = FACTION_META[p.faction];
             const isDimmed = matches !== null && !matches.includes(p);
             const isActive = selected?.name === p.name;
+            // une planète ennemie où la République a pris le dessus (>
+            // 50% d'influence, voir attaquer la planète) se teinte en bleu
+            const contested = planetInfluence[p.name];
+            const dotColor =
+              contested != null && contested > 50 ? FACTION_META.republique.color : meta.color;
             return (
               <div
                 key={p.name}
@@ -720,9 +775,9 @@ export default function GalaxyMap() {
                 style={{
                   left: p.x,
                   top: p.y,
-                  ["--dot-fill" as string]: meta.color,
+                  ["--dot-fill" as string]: dotColor,
                   ["--dot-ring" as string]: "rgba(10,10,20,0.9)",
-                  ["--dot-glow" as string]: meta.color,
+                  ["--dot-glow" as string]: dotColor,
                   ["--pulse-delay" as string]: `${idx * 0.17}s`,
                 }}
                 onClick={() => {
@@ -847,7 +902,7 @@ export default function GalaxyMap() {
                             <button
                               className={styles.fleetActionBtn}
                               disabled={triggeringAction === u.id}
-                              onClick={() => triggerAction(u.id, available.action)}
+                              onClick={() => handlePlanetAction(u.id, u.name, available.action, available.planet.name)}
                             >
                               {ACTION_LABEL[available.action]}
                             </button>
@@ -971,6 +1026,44 @@ export default function GalaxyMap() {
         </div>
       )}
 
+      {attackChoiceFor && (
+        <div className={styles.encounterOverlay}>
+          <div className={styles.encounterModal}>
+            <div className={styles.encounterTitle}>Attaque de {attackChoiceFor.planetName}</div>
+            <p className={styles.encounterText}>
+              <strong>{attackChoiceFor.shipName}</strong> et sa flotte sont prêts à l&apos;assaut. Envoyer une
+              reconnaissance pour évaluer les chances, ou attaquer directement ?
+            </p>
+            {reconResult && (
+              <p className={styles.encounterOdds}>
+                {reconResult.fleetSize < reconResult.minFleetSize
+                  ? `Flotte trop réduite (${reconResult.fleetSize}/${reconResult.minFleetSize} vaisseaux min.) — l'attaque échouera à coup sûr.`
+                  : `Chances de victoire estimées : ${reconResult.winChance}%`}
+              </p>
+            )}
+            <div className={styles.encounterActions}>
+              <button className={styles.encounterNegotiate} disabled={reconLoading} onClick={runReconnaissance}>
+                {reconLoading ? "Reconnaissance…" : "🔭 Reconnaissance"}
+              </button>
+              <button
+                className={styles.encounterFight}
+                disabled={triggeringAction === attackChoiceFor.shipId}
+                onClick={() => {
+                  const { shipId } = attackChoiceFor;
+                  setAttackChoiceFor(null);
+                  void triggerAction(shipId, "attack");
+                }}
+              >
+                ⚔ Attaquer
+              </button>
+              <button className={styles.encounterFlee} onClick={() => setAttackChoiceFor(null)}>
+                Annuler
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {attackResult && (
         <div className={styles.encounterOverlay}>
           <div
@@ -1050,11 +1143,8 @@ export default function GalaxyMap() {
             </div>
           </div>
         ) : selected ? (
-          <div>
-            <div
-              className={styles.panelFaction}
-              style={{ ["--f" as string]: FACTION_META[selected.faction].color }}
-            >
+          <div style={{ ["--f" as string]: FACTION_META[selected.faction].color }}>
+            <div className={styles.panelFaction}>
               <span className={styles.swatch} />
               {FACTION_META[selected.faction].label}
             </div>
@@ -1069,6 +1159,20 @@ export default function GalaxyMap() {
                 SECT.Y <b>{selected.y}</b>
               </div>
             </div>
+            {(selected.faction === "csi" || selected.faction === "mandalore") && (
+              <div className={styles.influenceGauge}>
+                <div className={styles.influenceLabel}>
+                  <span>République {planetInfluence[selected.name] ?? 0}%</span>
+                  <span>{FACTION_META[selected.faction].label} {100 - (planetInfluence[selected.name] ?? 0)}%</span>
+                </div>
+                <div className={styles.influenceBar}>
+                  <div
+                    className={styles.influenceFillRepublic}
+                    style={{ width: `${planetInfluence[selected.name] ?? 0}%` }}
+                  />
+                </div>
+              </div>
+            )}
             <div className={styles.panelActions}>
               <a
                 className={styles.actionBtn}
@@ -1125,7 +1229,7 @@ export default function GalaxyMap() {
                   key={ship.id}
                   className={styles.actionBtn}
                   disabled={triggeringAction === ship.id}
-                  onClick={() => triggerAction(ship.id, action)}
+                  onClick={() => handlePlanetAction(ship.id, ship.name, action, selected.name)}
                 >
                   {ACTION_LABEL[action]}
                   {unlockedShips.length > 1 ? ` — ${ship.name}` : ""}
