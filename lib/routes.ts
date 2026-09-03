@@ -33,7 +33,7 @@ function computeNearestNeighbourEdges(): RouteEdge[] {
 // isolé du reste du réseau, à Ruusan.
 const MANUAL_ROUTE_NAMES: [string, string][] = [
   ["Zanbar", "Ruusan"],
-  ["Hypori", "Moraband"],
+  ["Hypori", "Dathomir"],
 ];
 
 export const ROUTE_EDGES: RouteEdge[] = [
