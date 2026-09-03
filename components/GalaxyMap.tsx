@@ -518,6 +518,19 @@ export default function GalaxyMap() {
     });
   }
 
+  // vaisseaux contrôlés, à l'arrêt sur la planète actuellement affichée
+  // dans le panneau, avec une action disponible ici (aide humanitaire /
+  // propager l'influence)
+  const planetShipActions = selected
+    ? unlockedShips
+        .map((u) => {
+          const info = idlePlanetAction(u);
+          if (!info || info.planet.name !== selected.name) return null;
+          return { ship: u, action: info.action };
+        })
+        .filter((v): v is { ship: UnlockedShip; action: PlanetAction } => v !== null)
+    : [];
+
   return (
     <div className={styles.root}>
       <div
@@ -875,6 +888,17 @@ export default function GalaxyMap() {
                   Envoyer Vaisseau
                 </button>
               )}
+              {planetShipActions.map(({ ship, action }) => (
+                <button
+                  key={ship.id}
+                  className={styles.actionBtn}
+                  disabled={triggeringAction === ship.id}
+                  onClick={() => triggerAction(ship.id, action)}
+                >
+                  {ACTION_LABEL[action]}
+                  {unlockedShips.length > 1 ? ` — ${ship.name}` : ""}
+                </button>
+              ))}
             </div>
           </div>
         ) : (
