@@ -915,13 +915,15 @@ export default function GalaxyMap() {
               >
                 Combattre{encounterShip.encounter_win_chance != null ? ` (${encounterShip.encounter_win_chance}%)` : ""}
               </button>
-              <button
-                className={styles.encounterNegotiate}
-                disabled={resolvingEncounter}
-                onClick={() => resolveEncounter(encounterShip.id, "negotiate")}
-              >
-                Négocier le passage
-              </button>
+              {encounterShip.encounter_enemy_faction !== "csi" && (
+                <button
+                  className={styles.encounterNegotiate}
+                  disabled={resolvingEncounter}
+                  onClick={() => resolveEncounter(encounterShip.id, "negotiate")}
+                >
+                  Négocier le passage
+                </button>
+              )}
               <button
                 className={styles.encounterFlee}
                 disabled={resolvingEncounter}
@@ -931,9 +933,11 @@ export default function GalaxyMap() {
               </button>
             </div>
             <p className={styles.encounterHint}>
-              Négocier réussit presque toujours (sinon, combat). Fuir est sans risque mais annule le
-              trajet et ramène le vaisseau d&apos;où il venait. Combattre et perdre endommage le
-              vaisseau et le force à rallier Coruscant.
+              {encounterShip.encounter_enemy_faction === "csi"
+                ? "La CSI ne négocie pas. "
+                : "Négocier réussit presque toujours (sinon, combat). "}
+              Fuir est sans risque mais annule le trajet et ramène le vaisseau d&apos;où il venait.
+              Combattre et perdre endommage le vaisseau et le force à rallier Coruscant.
             </p>
           </div>
         </div>

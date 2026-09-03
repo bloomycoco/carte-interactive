@@ -90,6 +90,8 @@ export default function AdminDashboard({ role }: { role: Role }) {
   const [adminCode, setAdminCode] = useState("");
   const [savingCodes, setSavingCodes] = useState(false);
 
+  const [respawningNpc, setRespawningNpc] = useState(false);
+
   const loadFleets = useCallback(async () => {
     try {
       const data = await jsonOrThrow(await fetch("/api/admin/fleets"));
@@ -176,6 +178,20 @@ export default function AdminDashboard({ role }: { role: Role }) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setCreatingNpcFleet(false);
+    }
+  }
+
+  async function respawnAllNpc() {
+    setError(null);
+    setRespawningNpc(true);
+    try {
+      const data = await jsonOrThrow(await fetch("/api/admin/npc/respawn", { method: "POST" }));
+      flash(data.spawned > 0 ? `${data.spawned} flotte(s) NPC redonnée(s)` : "Toutes les flottes NPC sont déjà au complet");
+      await loadFleets();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRespawningNpc(false);
     }
   }
 
@@ -479,6 +495,12 @@ export default function AdminDashboard({ role }: { role: Role }) {
               {creatingNpcFleet ? "Création…" : "Créer"}
             </button>
           </form>
+          <p className={styles.hint}>
+            Une flotte NPC détruite au combat réapparaît 5 min plus tard. En cas de besoin :
+          </p>
+          <button className={styles.smallBtnGhost} onClick={respawnAllNpc} disabled={respawningNpc}>
+            {respawningNpc ? "Respawn…" : "Respawn tous les NPC"}
+          </button>
         </section>
       )}
 

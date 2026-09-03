@@ -45,9 +45,10 @@ export async function POST(
     encounter_x: number | null;
     encounter_y: number | null;
     encounter_npc_ship_id: string | null;
+    encounter_enemy_faction: string | null;
   }>`
     select id, fleet_id, name, code, path, departed_at, arrival_at, encounter_pending, encounter_at,
-           encounter_win_chance, encounter_x, encounter_y, encounter_npc_ship_id
+           encounter_win_chance, encounter_x, encounter_y, encounter_npc_ship_id, encounter_enemy_faction
     from ships
     where id = ${id}::uuid
   `;
@@ -56,6 +57,10 @@ export async function POST(
   if (ship.code !== code) return NextResponse.json({ error: "code incorrect" }, { status: 403 });
   if (!ship.encounter_pending || !ship.encounter_at || !ship.path || !ship.departed_at || !ship.arrival_at) {
     return NextResponse.json({ error: "aucune rencontre en cours" }, { status: 400 });
+  }
+  // la CSI ne négocie jamais : guerre totale contre la République
+  if (choice === "negotiate" && ship.encounter_enemy_faction === "csi") {
+    return NextResponse.json({ error: "la CSI ne négocie pas" }, { status: 400 });
   }
 
   const encounterAt = new Date(ship.encounter_at);
