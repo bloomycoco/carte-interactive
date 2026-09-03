@@ -330,9 +330,8 @@
   color: var(--signal);
   margin: 0 0 18px;
 }
-.encounterActions { display: flex; gap: 12px; }
+.encounterActions { display: flex; flex-direction: column; gap: 9px; }
 .encounterActions button {
-  flex: 1;
   padding: 11px 14px;
   border-radius: 8px;
   font-size: 13.5px;
@@ -348,6 +347,12 @@
   color: var(--star);
 }
 .encounterFight:hover:not(:disabled) { filter: brightness(1.2); }
+.encounterNegotiate {
+  background: rgba(217, 160, 74, 0.15);
+  border: 1px solid var(--cartel);
+  color: var(--star);
+}
+.encounterNegotiate:hover:not(:disabled) { filter: brightness(1.2); }
 .encounterFlee {
   background: rgba(217, 82, 74, 0.15);
   border: 1px solid var(--separatist);

@@ -165,6 +165,7 @@
 .factionTag[data-faction="republique"] { background: rgba(91, 143, 217, 0.2); border: 1px solid var(--republic); }
 .factionTag[data-faction="csi"] { background: rgba(217, 82, 74, 0.18); border: 1px solid var(--separatist); }
 .factionTag[data-faction="mandalore"] { background: rgba(138, 148, 166, 0.2); border: 1px solid var(--mandalore); }
+.factionTag[data-faction="cartel"] { background: rgba(217, 160, 74, 0.2); border: 1px solid var(--cartel); }
 
 .fleetList { display: flex; flex-direction: column; gap: 18px; }
 .fleetBlock {
@@ -183,6 +184,16 @@
   font-size: 11px;
   color: var(--star-dim);
   white-space: nowrap;
+}
+.npcTag {
+  font-family: var(--font-ibm-plex-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(138, 148, 166, 0.2);
+  border: 1px solid var(--mandalore);
+  color: var(--star-dim);
 }
 
 .smallBtn, .smallBtnGhost {

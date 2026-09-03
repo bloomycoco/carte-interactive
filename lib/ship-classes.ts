@@ -23,6 +23,14 @@ export const SHIP_CLASSES: Record<Faction, string[]> = {
     "Hardcell",
   ],
   mandalore: ["Kom'rk", "Gauntlet", "Basilisk", "Jehavey'ir", "Corvette Mandalorienne"],
+  cartel: [
+    "Corvette du Cartel",
+    "Canonnière Trandoshane",
+    "Yacht de Jabba",
+    "Croiseur Pyke",
+    "Intercepteur mercenaire",
+    "Patrouilleur Nikto",
+  ],
 };
 
 // Puissance de combat indicative par classe (gabarit/armement approximatifs).
@@ -48,6 +56,12 @@ export const SHIP_CLASS_POWER: Record<string, number> = {
   Basilisk: 5,
   "Jehavey'ir": 6,
   "Corvette Mandalorienne": 5,
+  "Corvette du Cartel": 4,
+  "Canonnière Trandoshane": 3,
+  "Yacht de Jabba": 5,
+  "Croiseur Pyke": 6,
+  "Intercepteur mercenaire": 3,
+  "Patrouilleur Nikto": 3,
 };
 
 // Vaisseau sans classe définie : puissance de base modeste.

@@ -1,12 +1,20 @@
 import { getDatabase } from "@/lib/db";
 import { NextResponse } from "next/server";
-import { planTravelAlongPath, positionAt, rollCombatWin, type Waypoint } from "@/lib/fleets";
+import {
+  planTravelAlongPath,
+  positionAt,
+  rollCombatWin,
+  rollNegotiationSuccess,
+  type Waypoint,
+} from "@/lib/fleets";
 import { nearestPlanet, shortestPath } from "@/lib/routes";
 
-// Résout une rencontre en cours : combattre (chance de victoire) ou fuir
-// (dégâts garantis). En cas de fuite ou de défaite, le vaisseau est
-// endommagé et forcé de rejoindre Coruscant depuis sa position actuelle.
-// En cas de victoire, le trajet reprend simplement là où il en était.
+// Résout une rencontre en cours : combattre (chance de victoire, calculée
+// au moment de la rencontre), négocier le passage (très souvent réussi,
+// sinon un combat s'engage quand même), ou fuir (toujours réussi, mais
+// annule le trajet et renvoie le vaisseau d'où il venait). Une défaite
+// au combat (choisi ou après une négociation ratée) endommage le
+// vaisseau et le force à rallier Coruscant ; fuir n'inflige aucun dégât.
 export async function POST(
   request: Request,
   ctx: RouteContext<"/api/ships/[id]/resolve-encounter">,
@@ -17,7 +25,7 @@ export async function POST(
   const choice = body?.choice;
 
   if (!code) return NextResponse.json({ error: "code requis" }, { status: 400 });
-  if (choice !== "fight" && choice !== "flee") {
+  if (choice !== "fight" && choice !== "negotiate" && choice !== "flee") {
     return NextResponse.json({ error: "choix invalide" }, { status: 400 });
   }
 
@@ -33,9 +41,11 @@ export async function POST(
     encounter_pending: boolean;
     encounter_at: string | null;
     encounter_win_chance: number | null;
+    encounter_x: number | null;
+    encounter_y: number | null;
   }>`
     select id, fleet_id, name, code, path, departed_at, arrival_at, encounter_pending, encounter_at,
-           encounter_win_chance
+           encounter_win_chance, encounter_x, encounter_y
     from ships
     where id = ${id}::uuid
   `;
@@ -51,61 +61,113 @@ export async function POST(
     return NextResponse.json({ error: "la rencontre n'a pas encore eu lieu" }, { status: 400 });
   }
 
-  const won = choice === "fight" && rollCombatWin(ship.encounter_win_chance ?? 50);
+  const frozenPos =
+    ship.encounter_x != null && ship.encounter_y != null
+      ? { x: ship.encounter_x, y: ship.encounter_y }
+      : positionAt(ship.path, new Date(ship.departed_at), new Date(ship.arrival_at), encounterAt);
 
-  if (won) {
+  async function resume(outcome: "won" | "negotiated") {
     // décale tout le calendrier du temps passé à décider : le trajet
     // reprend exactement là où il s'était figé, sans rien perdre.
     const pauseMs = Date.now() - encounterAt.getTime();
-    const newDeparted = new Date(new Date(ship.departed_at).getTime() + pauseMs);
-    const newArrival = new Date(new Date(ship.arrival_at).getTime() + pauseMs);
+    const newDeparted = new Date(new Date(ship!.departed_at!).getTime() + pauseMs);
+    const newArrival = new Date(new Date(ship!.arrival_at!).getTime() + pauseMs);
 
     const updated = await db.sql`
       update ships
       set departed_at = ${newDeparted.toISOString()}, arrival_at = ${newArrival.toISOString()},
           encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
-          encounter_win_chance = null,
+          encounter_win_chance = null, encounter_enemy_faction = null,
           updated_at = now()
       where id = ${id}::uuid
       returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,
                 damaged, encounter_pending, encounter_at
     `;
-    await db.sql`update fleets set kills = kills + 1, updated_at = now() where id = ${ship.fleet_id}::uuid`;
-    return NextResponse.json({ ship: updated[0], outcome: "won" });
+    if (outcome === "won") {
+      await db.sql`update fleets set kills = kills + 1, updated_at = now() where id = ${ship!.fleet_id}::uuid`;
+    }
+    return NextResponse.json({ ship: updated[0], outcome });
   }
 
-  // fui, ou combat perdu : dégâts + repli forcé vers Coruscant depuis
-  // le point exact de la rencontre
-  const pos = positionAt(ship.path, new Date(ship.departed_at), new Date(ship.arrival_at), encounterAt);
-  const originPlanet = nearestPlanet(pos.x, pos.y);
-  const retreatPath = shortestPath(originPlanet.name, "Coruscant");
-  if (!retreatPath) {
-    return NextResponse.json({ error: "aucune route de repli connue" }, { status: 500 });
+  async function loseCombat() {
+    // défaite : dégâts + repli forcé vers Coruscant depuis le point exact
+    // de la rencontre
+    const originPlanet = nearestPlanet(frozenPos.x, frozenPos.y);
+    const retreatPath = shortestPath(originPlanet.name, "Coruscant");
+    if (!retreatPath) {
+      return NextResponse.json({ error: "aucune route de repli connue" }, { status: 500 });
+    }
+    const firstHop = retreatPath[0];
+    const startsAtFirstHop = firstHop.x === frozenPos.x && firstHop.y === frozenPos.y;
+    const waypoints: Waypoint[] = [
+      frozenPos,
+      ...(startsAtFirstHop ? retreatPath.slice(1) : retreatPath).map((p) => ({ x: p.x, y: p.y })),
+    ];
+    const { departedAt, arrivalAt } = planTravelAlongPath(waypoints);
+    const dest = waypoints[waypoints.length - 1];
+
+    const updated = await db.sql`
+      update ships
+      set x = ${frozenPos.x}, y = ${frozenPos.y},
+          dest_x = ${dest.x}, dest_y = ${dest.y}, dest_planet = 'Coruscant',
+          path = ${JSON.stringify(waypoints)}::jsonb,
+          departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
+          damaged = true,
+          encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
+          encounter_win_chance = null, encounter_enemy_faction = null,
+          updated_at = now()
+      where id = ${id}::uuid
+      returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,
+                damaged, encounter_pending, encounter_at
+    `;
+    await db.sql`update fleets set losses = losses + 1, updated_at = now() where id = ${ship!.fleet_id}::uuid`;
+    return NextResponse.json({ ship: updated[0], outcome: "lost" });
   }
-  const firstHop = retreatPath[0];
-  const startsAtFirstHop = firstHop.x === pos.x && firstHop.y === pos.y;
-  const waypoints: Waypoint[] = [
-    { x: pos.x, y: pos.y },
-    ...(startsAtFirstHop ? retreatPath.slice(1) : retreatPath).map((p) => ({ x: p.x, y: p.y })),
-  ];
-  const { departedAt, arrivalAt } = planTravelAlongPath(waypoints);
-  const dest = waypoints[waypoints.length - 1];
 
-  const updated = await db.sql`
-    update ships
-    set x = ${pos.x}, y = ${pos.y},
-        dest_x = ${dest.x}, dest_y = ${dest.y}, dest_planet = 'Coruscant',
-        path = ${JSON.stringify(waypoints)}::jsonb,
-        departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
-        damaged = true,
-        encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
-        encounter_win_chance = null,
-        updated_at = now()
-    where id = ${id}::uuid
-    returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,
-              damaged, encounter_pending, encounter_at
-  `;
-  await db.sql`update fleets set losses = losses + 1, updated_at = now() where id = ${ship.fleet_id}::uuid`;
+  if (choice === "flee") {
+    // fuir réussit toujours, sans dégât : le vaisseau rebrousse chemin
+    // vers la planète d'où il venait pour ce trajet
+    const homePlanet = nearestPlanet(ship.path[0].x, ship.path[0].y);
+    const retreatPath = shortestPath(
+      nearestPlanet(frozenPos.x, frozenPos.y).name,
+      homePlanet.name,
+    );
+    if (!retreatPath) {
+      return NextResponse.json({ error: "aucune route de repli connue" }, { status: 500 });
+    }
+    const firstHop = retreatPath[0];
+    const startsAtFirstHop = firstHop.x === frozenPos.x && firstHop.y === frozenPos.y;
+    const waypoints: Waypoint[] = [
+      frozenPos,
+      ...(startsAtFirstHop ? retreatPath.slice(1) : retreatPath).map((p) => ({ x: p.x, y: p.y })),
+    ];
+    const { departedAt, arrivalAt } = planTravelAlongPath(waypoints);
+    const dest = waypoints[waypoints.length - 1];
 
-  return NextResponse.json({ ship: updated[0], outcome: choice === "flee" ? "fled" : "lost" });
+    const updated = await db.sql`
+      update ships
+      set x = ${frozenPos.x}, y = ${frozenPos.y},
+          dest_x = ${dest.x}, dest_y = ${dest.y}, dest_planet = ${homePlanet.name},
+          path = ${JSON.stringify(waypoints)}::jsonb,
+          departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
+          encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
+          encounter_win_chance = null, encounter_enemy_faction = null,
+          updated_at = now()
+      where id = ${id}::uuid
+      returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,
+                damaged, encounter_pending, encounter_at
+    `;
+    return NextResponse.json({ ship: updated[0], outcome: "fled" });
+  }
+
+  if (choice === "negotiate") {
+    if (rollNegotiationSuccess()) return resume("negotiated");
+    // négociation ratée : combat, résolu comme "combattre"
+    if (rollCombatWin(ship.encounter_win_chance ?? 50)) return resume("won");
+    return loseCombat();
+  }
+
+  // choice === "fight"
+  if (rollCombatWin(ship.encounter_win_chance ?? 50)) return resume("won");
+  return loseCombat();
 }

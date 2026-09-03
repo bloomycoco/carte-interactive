@@ -250,7 +250,7 @@ export default function GalaxyMap() {
       new Date(s.encounter_at).getTime() <= now,
   );
 
-  async function resolveEncounter(shipId: string, choice: "fight" | "flee") {
+  async function resolveEncounter(shipId: string, choice: "fight" | "negotiate" | "flee") {
     const unlocked = unlockedShips.find((u) => u.id === shipId);
     if (!unlocked) return;
     setResolvingEncounter(true);
@@ -269,9 +269,11 @@ export default function GalaxyMap() {
       const msg =
         data.outcome === "won"
           ? `${unlocked.name} a repoussé l'ennemi et poursuit sa route !`
-          : data.outcome === "fled"
-            ? `${unlocked.name} a fui le combat — vaisseau endommagé, repli forcé vers Coruscant.`
-            : `${unlocked.name} a perdu le combat — vaisseau endommagé, repli forcé vers Coruscant.`;
+          : data.outcome === "negotiated"
+            ? `${unlocked.name} a négocié son passage et poursuit sa route.`
+            : data.outcome === "fled"
+              ? `${unlocked.name} a rebroussé chemin pour éviter le combat.`
+              : `${unlocked.name} a perdu le combat — vaisseau endommagé, repli forcé vers Coruscant.`;
       setFleetNotice(msg);
     } catch {
       setFleetNotice("erreur réseau");
@@ -777,7 +779,10 @@ export default function GalaxyMap() {
           <div className={styles.encounterModal}>
             <div className={styles.encounterTitle}>Flotte ennemie en approche</div>
             <p className={styles.encounterText}>
-              <strong>{encounterShip.name}</strong> croise une flotte ennemie
+              <strong>{encounterShip.name}</strong> croise une
+              {encounterShip.encounter_enemy_faction
+                ? ` flotte ${FACTION_META[encounterShip.encounter_enemy_faction].label}`
+                : " flotte ennemie"}
               {encounterShip.dest_planet ? ` sur la route vers ${encounterShip.dest_planet}` : ""}.
               Que fait l&apos;équipage ?
             </p>
@@ -795,6 +800,13 @@ export default function GalaxyMap() {
                 Combattre{encounterShip.encounter_win_chance != null ? ` (${encounterShip.encounter_win_chance}%)` : ""}
               </button>
               <button
+                className={styles.encounterNegotiate}
+                disabled={resolvingEncounter}
+                onClick={() => resolveEncounter(encounterShip.id, "negotiate")}
+              >
+                Négocier le passage
+              </button>
+              <button
                 className={styles.encounterFlee}
                 disabled={resolvingEncounter}
                 onClick={() => resolveEncounter(encounterShip.id, "flee")}
@@ -803,8 +815,9 @@ export default function GalaxyMap() {
               </button>
             </div>
             <p className={styles.encounterHint}>
-              Fuir endommage le vaisseau et le force à rejoindre Coruscant. Combattre risque la même
-              chose, mais en cas de victoire le vaisseau poursuit sa route indemne.
+              Négocier réussit presque toujours (sinon, combat). Fuir est sans risque mais annule le
+              trajet et ramène le vaisseau d&apos;où il venait. Combattre et perdre endommage le
+              vaisseau et le force à rallier Coruscant.
             </p>
           </div>
         </div>

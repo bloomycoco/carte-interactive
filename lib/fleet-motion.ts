@@ -3,7 +3,7 @@
 // visuelle en temps réel sur la carte). Les vaisseaux suivent le réseau
 // de routes (voir lib/routes.ts), jamais une ligne droite.
 
-export type Faction = "republique" | "csi" | "mandalore";
+export type Faction = "republique" | "csi" | "mandalore" | "cartel";
 
 // Unités-monde par seconde. La carte fait 5460x3460 : la traverser en
 // entier prend environ 9 minutes ; un petit saut entre systèmes voisins
@@ -31,6 +31,9 @@ export type ShipTravelState = {
   encounter_pending?: boolean;
   encounter_at?: string | null;
   encounter_win_chance?: number | null;
+  // clan de la flotte NPC croisée, pour l'affichage ("vous croisez une
+  // flotte du Cartel !")
+  encounter_enemy_faction?: Faction | null;
   // action en cours à la surface d'une planète (propagation d'influence
   // ou saisie par le Cartel) : le vaisseau est immobilisé entre
   // action_started_at et action_ends_at (une saisie est programmée dès

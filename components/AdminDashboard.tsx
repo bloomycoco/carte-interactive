@@ -7,7 +7,8 @@ import { SHIP_CLASSES } from "@/lib/ship-classes";
 import styles from "./AdminDashboard.module.css";
 
 type Role = "owner" | "admin";
-type Faction = "republique" | "csi" | "mandalore";
+type Faction = "republique" | "csi" | "mandalore" | "cartel";
+type NpcFaction = "csi" | "mandalore" | "cartel";
 
 type ShipRow = {
   id: string;
@@ -33,6 +34,7 @@ type FleetRow = {
   id: string;
   name: string;
   faction: Faction;
+  is_npc: boolean;
   code: string;
   kills: number;
   losses: number;
@@ -44,6 +46,7 @@ const FACTION_LABEL: Record<Faction, string> = {
   republique: "République",
   csi: "CSI",
   mandalore: "Mandalore",
+  cartel: "Cartel",
 };
 
 async function jsonOrThrow(res: Response) {
@@ -71,8 +74,11 @@ export default function AdminDashboard({ role }: { role: Role }) {
   const [, forceTick] = useState(0);
 
   const [fleetName, setFleetName] = useState("");
-  const [fleetFaction, setFleetFaction] = useState<Faction>("republique");
   const [creatingFleet, setCreatingFleet] = useState(false);
+
+  const [npcFleetName, setNpcFleetName] = useState("");
+  const [npcFleetFaction, setNpcFleetFaction] = useState<NpcFaction>("csi");
+  const [creatingNpcFleet, setCreatingNpcFleet] = useState(false);
 
   const [shipDrafts, setShipDrafts] = useState<
     Record<string, { name: string; planet: string; category: string }>
@@ -137,7 +143,7 @@ export default function AdminDashboard({ role }: { role: Role }) {
         await fetch("/api/admin/fleets", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: fleetName.trim(), faction: fleetFaction }),
+          body: JSON.stringify({ name: fleetName.trim(), faction: "republique" }),
         }),
       );
       setFleets((prev) => (prev ? [...prev, data.fleet] : [data.fleet]));
@@ -147,6 +153,28 @@ export default function AdminDashboard({ role }: { role: Role }) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setCreatingFleet(false);
+    }
+  }
+
+  async function handleCreateNpcFleet(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setCreatingNpcFleet(true);
+    try {
+      const data = await jsonOrThrow(
+        await fetch("/api/admin/fleets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: npcFleetName.trim(), faction: npcFleetFaction, isNpc: true }),
+        }),
+      );
+      setFleets((prev) => (prev ? [...prev, data.fleet] : [data.fleet]));
+      setNpcFleetName("");
+      flash(`Flotte NPC "${data.fleet.name}" créée`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCreatingNpcFleet(false);
     }
   }
 
@@ -390,7 +418,11 @@ export default function AdminDashboard({ role }: { role: Role }) {
 
       {isOwner && (
         <section className={styles.section}>
-          <h2>Créer une flotte</h2>
+          <h2>Créer une flotte République</h2>
+          <p className={styles.hint}>
+            Seule la République peut être jouée. Les autres clans n&apos;existent que comme flottes
+            NPC (ci-dessous).
+          </p>
           <form className={styles.inlineForm} onSubmit={handleCreateFleet}>
             <input
               required
@@ -398,13 +430,35 @@ export default function AdminDashboard({ role }: { role: Role }) {
               value={fleetName}
               onChange={(e) => setFleetName(e.target.value)}
             />
-            <select value={fleetFaction} onChange={(e) => setFleetFaction(e.target.value as Faction)}>
-              <option value="republique">République</option>
-              <option value="csi">CSI</option>
-              <option value="mandalore">Mandalore</option>
-            </select>
             <button type="submit" disabled={creatingFleet}>
               {creatingFleet ? "Création…" : "Créer"}
+            </button>
+          </form>
+        </section>
+      )}
+
+      {isOwner && (
+        <section className={styles.section}>
+          <h2>Créer une flotte NPC</h2>
+          <p className={styles.hint}>
+            Se balade seule entre les planètes de son propre clan, sans jamais quitter son
+            territoire. Une flotte République qui en croise une en route déclenche une vraie
+            rencontre.
+          </p>
+          <form className={styles.inlineForm} onSubmit={handleCreateNpcFleet}>
+            <input
+              required
+              placeholder="Nom de la flotte NPC"
+              value={npcFleetName}
+              onChange={(e) => setNpcFleetName(e.target.value)}
+            />
+            <select value={npcFleetFaction} onChange={(e) => setNpcFleetFaction(e.target.value as NpcFaction)}>
+              <option value="csi">CSI</option>
+              <option value="mandalore">Mandalore</option>
+              <option value="cartel">Cartel</option>
+            </select>
+            <button type="submit" disabled={creatingNpcFleet}>
+              {creatingNpcFleet ? "Création…" : "Créer"}
             </button>
           </form>
         </section>
@@ -424,11 +478,18 @@ export default function AdminDashboard({ role }: { role: Role }) {
                   <span data-faction={f.faction} className={styles.factionTag}>
                     {FACTION_LABEL[f.faction]}
                   </span>
+                  {f.is_npc && (
+                    <span className={styles.npcTag} title="Flotte NPC : se balade seule sur son territoire">
+                      NPC
+                    </span>
+                  )}
                   <span className={styles.fleetTitle}>{f.name}</span>
                   <span className={styles.code}>{f.code}</span>
-                  <span className={styles.kdaTag} title="Force de la flotte (vaisseaux + expérience de combat)">
-                    ⚔ {f.strength} · {f.kills}V-{f.losses}D
-                  </span>
+                  {!f.is_npc && (
+                    <span className={styles.kdaTag} title="Force de la flotte (vaisseaux + expérience de combat)">
+                      ⚔ {f.strength} · {f.kills}V-{f.losses}D
+                    </span>
+                  )}
                   {isOwner && (
                     <div className={styles.actions}>
                       <button className={styles.smallBtnGhost} onClick={() => renameFleet(f.id, f.name)}>

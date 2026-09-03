@@ -4,7 +4,7 @@ import { requireRole } from "@/lib/session";
 import { generateCode, type Faction } from "@/lib/fleets";
 import { fleetStrength } from "@/lib/ship-classes";
 
-const FACTIONS = ["republique", "csi", "mandalore"] as const;
+const NPC_FACTIONS = ["csi", "mandalore", "cartel"] as const;
 
 // Liste des flottes AVEC leur code et leurs vaisseaux (codes inclus)
 // (Owner et Admin uniquement).
@@ -17,13 +17,14 @@ export async function GET() {
     id: string;
     name: string;
     faction: Faction;
+    is_npc: boolean;
     code: string;
     kills: number;
     losses: number;
     created_at: string;
     updated_at: string;
   }>`
-    select id, name, faction, code, kills, losses, created_at, updated_at
+    select id, name, faction, is_npc, code, kills, losses, created_at, updated_at
     from fleets order by created_at asc
   `;
   const ships = await db.sql<{
@@ -63,6 +64,9 @@ export async function GET() {
 }
 
 // Crée une flotte (Owner uniquement). Génère un code si aucun n'est fourni.
+// Les joueurs ne peuvent plus créer que des flottes République — les
+// flottes NPC (CSI/Mandalore/Cartel, isNpc: true) se baladent seules
+// entre les planètes de leur clan, confinées à leur territoire.
 export async function POST(request: Request) {
   const role = await requireRole(["owner"]);
   if (!role) return NextResponse.json({ error: "forbidden" }, { status: 403 });
@@ -70,22 +74,30 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const name = typeof body?.name === "string" ? body.name.trim() : "";
   const faction = body?.faction as Faction | undefined;
+  const isNpc = body?.isNpc === true;
   const code =
     typeof body?.code === "string" && body.code.trim()
       ? body.code.trim().toUpperCase()
       : generateCode();
 
   if (!name) return NextResponse.json({ error: "nom requis" }, { status: 400 });
-  if (!faction || !FACTIONS.includes(faction)) {
-    return NextResponse.json({ error: "faction invalide" }, { status: 400 });
+  if (isNpc) {
+    if (!faction || !NPC_FACTIONS.includes(faction as (typeof NPC_FACTIONS)[number])) {
+      return NextResponse.json({ error: "faction NPC invalide" }, { status: 400 });
+    }
+  } else if (faction !== "republique") {
+    return NextResponse.json(
+      { error: "seule la République peut être créée comme flotte joueur (les autres sont des flottes NPC)" },
+      { status: 400 },
+    );
   }
 
   const db = getDatabase();
   try {
     const rows = await db.sql`
-      insert into fleets (name, faction, code)
-      values (${name}, ${faction}, ${code})
-      returning id, name, faction, code, kills, losses, created_at, updated_at
+      insert into fleets (name, faction, code, is_npc)
+      values (${name}, ${faction}, ${code}, ${isNpc})
+      returning id, name, faction, is_npc, code, kills, losses, created_at, updated_at
     `;
     return NextResponse.json({ fleet: { ...rows[0], strength: fleetStrength([], 0, 0), ships: [] } });
   } catch {

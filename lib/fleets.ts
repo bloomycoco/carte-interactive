@@ -2,7 +2,8 @@
 // dépendance Node) et ajoute la génération de code, qui a besoin de
 // crypto — ce fichier est donc réservé au serveur.
 import crypto from "node:crypto";
-import { currentPosition, type Waypoint } from "./fleet-motion";
+import { currentPosition, type Faction, type Waypoint } from "./fleet-motion";
+import { PLANETS, type Planet } from "./planets";
 
 export * from "./fleet-motion";
 
@@ -22,32 +23,20 @@ function randomFraction() {
   return crypto.randomInt(1_000_000) / 1_000_000;
 }
 
-// En dessous de cette durée de trajet, jamais de rencontre (les petits
-// sauts entre voisins restent tranquilles).
-const ENCOUNTER_MIN_TRAVEL_SECONDS = 90;
-// Probabilité qu'un trajet assez long déclenche une rencontre.
-const ENCOUNTER_CHANCE = 0.3;
+// Distance (en unités-monde) en dessous de laquelle un vaisseau République
+// en transit et un vaisseau NPC en transit sont considérés comme se
+// croisant — déclenche une rencontre réelle (voir le tick dans
+// GET /api/ships), pas un tirage abstrait.
+export const ENCOUNTER_PROXIMITY = 120;
+
 // Force ennemie aléatoire (min/max) : comparable à une flotte modeste
 // de 1 à 2 vaisseaux moyens, pour que les chances restent disputées.
 const ENEMY_STRENGTH_MIN = 4;
 const ENEMY_STRENGTH_MAX = 16;
 
-// Tire au sort si une flotte ennemie sera croisée sur ce trajet et, si
-// oui, à quel moment (quelque part entre 20% et 80% du chemin — jamais
-// pile au départ ou à l'arrivée).
-export function maybeScheduleEncounter(departedAt: Date, arrivalAt: Date): { encounterAt: Date } | null {
-  const durationSeconds = (arrivalAt.getTime() - departedAt.getTime()) / 1000;
-  if (durationSeconds < ENCOUNTER_MIN_TRAVEL_SECONDS) return null;
-  if (randomFraction() >= ENCOUNTER_CHANCE) return null;
-
-  const frac = 0.2 + randomFraction() * 0.6;
-  const encounterAt = new Date(departedAt.getTime() + (arrivalAt.getTime() - departedAt.getTime()) * frac);
-  return { encounterAt };
-}
-
 // Tire au sort la force de la flotte ennemie croisée et en déduit un %
 // de chances de victoire (ratio de forces) — affiché au joueur avant
-// qu'il ne choisisse de combattre ou fuir.
+// qu'il ne choisisse de combattre, négocier, ou fuir.
 export function rollEncounterOdds(friendlyStrength: number) {
   const enemyStrength = ENEMY_STRENGTH_MIN + randomFraction() * (ENEMY_STRENGTH_MAX - ENEMY_STRENGTH_MIN);
   const winChancePercent = Math.round((friendlyStrength / (friendlyStrength + enemyStrength)) * 100);
@@ -60,6 +49,14 @@ export function rollCombatWin(winChancePercent: number) {
   return randomFraction() * 100 < winChancePercent;
 }
 
+// Chances qu'une tentative de négociation réussisse (passer sans combat).
+// En cas d'échec, un combat s'engage quand même (résolu comme "combattre").
+const NEGOTIATION_SUCCESS_CHANCE = 0.85;
+
+export function rollNegotiationSuccess() {
+  return randomFraction() < NEGOTIATION_SUCCESS_CHANCE;
+}
+
 // Risque de saisie du vaisseau par le Cartel à l'arrivée sur un de ses
 // mondes — 50/50, aucune action du joueur ne peut l'éviter.
 const CARTEL_SEIZURE_CHANCE = 0.5;
@@ -68,7 +65,7 @@ export function rollCartelSeizure() {
   return randomFraction() < CARTEL_SEIZURE_CHANCE;
 }
 
-// Position d'un vaisseau au moment précis d'une rencontre programmée
+// Position d'un vaisseau à un instant donné le long d'un trajet connu
 // (réutilise l'interpolation le long du chemin).
 export function positionAt(
   path: Waypoint[],
@@ -88,4 +85,13 @@ export function positionAt(
     },
     at.getTime(),
   );
+}
+
+// Choisit une destination aléatoire pour une flotte NPC : une planète de
+// son propre clan, différente de celle où elle se trouve déjà (les NPC
+// ne quittent jamais leur territoire).
+export function pickNpcDestination(faction: Faction, currentPlanetName: string): Planet | null {
+  const candidates = PLANETS.filter((p) => p.faction === faction && p.name !== currentPlanetName);
+  if (candidates.length === 0) return null;
+  return candidates[crypto.randomInt(candidates.length)];
 }
