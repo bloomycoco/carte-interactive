@@ -33,6 +33,20 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/ship
     if (!Number.isFinite(x) || !Number.isFinite(y)) {
       return NextResponse.json({ error: "coordonnées invalides" }, { status: 400 });
     }
+    // le vaisseau NPC croisé, s'il y en a un, ne doit pas rester figé pour
+    // toujours si CE vaisseau-ci est téléporté au lieu de résoudre sa
+    // rencontre normalement
+    const [current] = await db.sql<{ encounter_npc_ship_id: string | null }>`
+      select encounter_npc_ship_id from ships where id = ${id}::uuid
+    `;
+    if (current?.encounter_npc_ship_id) {
+      await db.sql`
+        update ships
+        set encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
+            updated_at = now()
+        where id = ${current.encounter_npc_ship_id}::uuid
+      `;
+    }
     // Téléporter annule tout trajet en cours et répare le vaisseau
     // (échappatoire Owner à un vaisseau endommagé ou bloqué).
     await db.sql`
@@ -40,6 +54,7 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/ship
       set x = ${x}, y = ${y}, dest_x = null, dest_y = null, dest_planet = null,
           path = null, departed_at = null, arrival_at = null, damaged = false,
           encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
+          encounter_win_chance = null, encounter_enemy_faction = null, encounter_npc_ship_id = null,
           action_type = null, action_started_at = null, action_ends_at = null,
           quest_type = null, quest_origin_planet = null, quest_target_planet = null, quest_phase = null,
           updated_at = now()
@@ -73,6 +88,17 @@ export async function DELETE(_request: Request, ctx: RouteContext<"/api/admin/sh
   const { id } = await ctx.params;
 
   const db = getDatabase();
+  const [current] = await db.sql<{ encounter_npc_ship_id: string | null }>`
+    select encounter_npc_ship_id from ships where id = ${id}::uuid
+  `;
+  if (current?.encounter_npc_ship_id) {
+    await db.sql`
+      update ships
+      set encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
+          updated_at = now()
+      where id = ${current.encounter_npc_ship_id}::uuid
+    `;
+  }
   await db.sql`delete from ships where id = ${id}::uuid`;
   return NextResponse.json({ deleted: true });
 }

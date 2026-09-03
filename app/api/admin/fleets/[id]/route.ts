@@ -44,6 +44,21 @@ export async function DELETE(_request: Request, ctx: RouteContext<"/api/admin/fl
   const { id } = await ctx.params;
 
   const db = getDatabase();
+  // les vaisseaux NPC croisés par ceux de cette flotte, s'il y en a, ne
+  // doivent pas rester figés pour toujours une fois leurs adversaires
+  // supprimés avec la flotte
+  const linked = await db.sql<{ encounter_npc_ship_id: string }>`
+    select encounter_npc_ship_id from ships
+    where fleet_id = ${id}::uuid and encounter_npc_ship_id is not null
+  `;
+  for (const { encounter_npc_ship_id } of linked) {
+    await db.sql`
+      update ships
+      set encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
+          updated_at = now()
+      where id = ${encounter_npc_ship_id}::uuid
+    `;
+  }
   await db.sql`delete from fleets where id = ${id}::uuid`;
   return NextResponse.json({ deleted: true });
 }

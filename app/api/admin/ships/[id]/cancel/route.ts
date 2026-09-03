@@ -21,8 +21,10 @@ export async function POST(_request: Request, ctx: RouteContext<"/api/admin/ship
     path: Waypoint[] | null;
     encounter_pending: boolean;
     encounter_at: string | null;
+    encounter_npc_ship_id: string | null;
   }>`
-    select x, y, dest_x, dest_y, departed_at, arrival_at, path, encounter_pending, encounter_at
+    select x, y, dest_x, dest_y, departed_at, arrival_at, path, encounter_pending, encounter_at,
+           encounter_npc_ship_id
     from ships where id = ${id}::uuid
   `;
   const ship = rows[0];
@@ -30,11 +32,23 @@ export async function POST(_request: Request, ctx: RouteContext<"/api/admin/ship
 
   const pos = currentPosition(ship);
 
+  // le vaisseau NPC croisé, s'il y en a un, ne doit pas rester figé pour
+  // toujours si la rencontre est annulée ici plutôt que résolue normalement
+  if (ship.encounter_npc_ship_id) {
+    await db.sql`
+      update ships
+      set encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
+          updated_at = now()
+      where id = ${ship.encounter_npc_ship_id}::uuid
+    `;
+  }
+
   const updated = await db.sql`
     update ships
     set x = ${pos.x}, y = ${pos.y}, dest_x = null, dest_y = null, dest_planet = null,
         path = null, departed_at = null, arrival_at = null,
         encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
+        encounter_win_chance = null, encounter_enemy_faction = null, encounter_npc_ship_id = null,
         action_type = null, action_started_at = null, action_ends_at = null,
         quest_type = null, quest_origin_planet = null, quest_target_planet = null, quest_phase = null,
         updated_at = now()
