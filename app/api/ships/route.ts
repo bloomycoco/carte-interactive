@@ -175,7 +175,10 @@ export async function GET() {
         new Date(s.action_started_at).getTime() <= now &&
         new Date(s.action_ends_at).getTime() > now,
     )
-    .map((s) => ({ ship: s, planet: nearestPlanet(s.x, s.y) }))
+    .map((s) => {
+      const pos = currentPosition(s, now);
+      return { ship: s, x: pos.x, y: pos.y, planet: nearestPlanet(pos.x, pos.y) };
+    })
     .filter((t) => t.planet.faction === "csi");
 
   for (const ship of ships) {
@@ -277,14 +280,14 @@ export async function GET() {
   // monde engage un combat IMMÉDIAT, sans possibilité de fuir ou
   // négocier : surpris en flagrant délit. L'opération est de toute façon
   // annulée, que le combat soit gagné ou perdu.
-  for (const { ship: republicShip } of influenceThreats) {
+  for (const { ship: republicShip, x: repX, y: repY } of influenceThreats) {
     if (republicShip.action_type !== "influence") continue; // déjà traité plus haut ce passage-ci
 
     let caught: ShipRow | null = null;
     for (const s of ships) {
       if (!s.is_npc || s.faction !== "csi" || s.damaged || s.encounter_pending) continue;
       const sPos = currentPosition(s, now);
-      if (Math.hypot(sPos.x - republicShip.x, sPos.y - republicShip.y) < ENCOUNTER_PROXIMITY) {
+      if (Math.hypot(sPos.x - repX, sPos.y - repY) < ENCOUNTER_PROXIMITY) {
         caught = s;
         break;
       }
@@ -318,13 +321,13 @@ export async function GET() {
       const idx = ships.indexOf(caught);
       if (idx !== -1) ships.splice(idx, 1);
     } else {
-      const originPlanet = nearestPlanet(republicShip.x, republicShip.y);
+      const originPlanet = nearestPlanet(repX, repY);
       const retreatPath = shortestPath(originPlanet.name, "Coruscant");
       if (retreatPath) {
         const firstHop = retreatPath[0];
-        const startsAtFirstHop = firstHop.x === republicShip.x && firstHop.y === republicShip.y;
+        const startsAtFirstHop = firstHop.x === repX && firstHop.y === repY;
         const waypoints: Waypoint[] = [
-          { x: republicShip.x, y: republicShip.y },
+          { x: repX, y: repY },
           ...(startsAtFirstHop ? retreatPath.slice(1) : retreatPath).map((p) => ({ x: p.x, y: p.y })),
         ];
         const { departedAt, arrivalAt } = planTravelAlongPath(waypoints);
@@ -332,7 +335,7 @@ export async function GET() {
 
         await db.sql`
           update ships
-          set x = ${republicShip.x}, y = ${republicShip.y},
+          set x = ${repX}, y = ${repY},
               dest_x = ${dest.x}, dest_y = ${dest.y}, dest_planet = 'Coruscant',
               path = ${JSON.stringify(waypoints)}::jsonb,
               departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
