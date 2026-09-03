@@ -460,18 +460,12 @@ export default function GalaxyMap() {
         : null;
     const action = availablePlanetAction(planet.name, planet.faction, unlocked.faction, quest);
     if (!action) return null;
-    // attaquer exige TOUTE la flotte rassemblée sur place, pas juste ce
-    // vaisseau — masque le bouton tant que ce n'est pas le cas
-    if (action === "attack") {
-      const fleetmates = ships.filter((s) => s.fleet_id === live.fleet_id);
-      const allGathered = fleetmates.every((s) => {
-        if (s.damaged || s.encounter_pending) return false;
-        const sPos = currentPosition(s, now);
-        if (sPos.traveling) return false;
-        return nearestPlanet(sPos.x, sPos.y).name === planet.name;
-      });
-      if (!allGathered) return null;
-    }
+    // attaquer engage toute la coalition République présente sur la
+    // planète à l'instant (voir republicCoalitionAt côté serveur), pas
+    // seulement ce vaisseau ni même sa propre flotte — le bouton est
+    // donc disponible dès que CE vaisseau est là, sans exiger que toute
+    // sa flotte le soit aussi (Reconnaissance révèle si la coalition
+    // réunie est suffisante).
     return { planet, action };
   }
 
@@ -738,26 +732,25 @@ export default function GalaxyMap() {
 
   // vaisseaux contrôlés, à l'arrêt sur la planète actuellement affichée
   // dans le panneau, avec une action disponible ici (aide humanitaire /
-  // attaquer la planète). "Attaquer" est une action pour TOUTE la flotte
-  // à la fois (déjà exigé par idlePlanetAction, qui vérifie que chaque
-  // vaisseau de la flotte est bien là) : un seul bouton par flotte, pas
-  // un par vaisseau qui la compose.
+  // attaquer la planète). "Attaquer" engage toute la coalition
+  // République présente sur la planète, toutes flottes confondues (voir
+  // republicCoalitionAt côté serveur) : un seul bouton pour la planète,
+  // pas un par vaisseau ni par flotte.
   const planetShipActions = selected
     ? (() => {
         const raw = unlockedShips
           .map((u) => {
             const info = idlePlanetAction(u);
             if (!info || info.planet.name !== selected.name) return null;
-            const live = ships.find((s) => s.id === u.id);
-            return { ship: u, action: info.action, fleetId: live?.fleet_id ?? u.id };
+            return { ship: u, action: info.action };
           })
-          .filter((v): v is { ship: UnlockedShip; action: PlanetAction; fleetId: string } => v !== null);
+          .filter((v): v is { ship: UnlockedShip; action: PlanetAction } => v !== null);
 
-        const seenAttackFleets = new Set<string>();
-        return raw.filter(({ action, fleetId }) => {
+        let seenAttack = false;
+        return raw.filter(({ action }) => {
           if (action !== "attack") return true;
-          if (seenAttackFleets.has(fleetId)) return false;
-          seenAttackFleets.add(fleetId);
+          if (seenAttack) return false;
+          seenAttack = true;
           return true;
         });
       })()

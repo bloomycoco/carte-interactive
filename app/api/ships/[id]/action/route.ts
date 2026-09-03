@@ -21,16 +21,21 @@ import { fleetStrength } from "@/lib/ship-classes";
 //   récupération des vivres sur place, puis retour les livrer sur le
 //   monde d'origine ;
 // - reconnaissance (monde d'un clan ennemi) : révèle les chances de
-//   victoire d'une attaque SANS rien engager (juste informatif) ;
+//   victoire d'une attaque SANS rien engager (juste informatif) — les
+//   mêmes chances qu'un "Attaquer" donnerait dans la foulée ;
 // - attaquer la planète (monde d'un clan ennemi) : résolu immédiatement,
-//   mais seulement si TOUTE la flotte (chaque vaisseau) est rassemblée
-//   sur place ET compte au moins MIN_ATTACK_FLEET_SIZE vaisseaux (sinon
-//   échec assuré) — une victoire renforce la flotte (kills) et fait
-//   gagner 7 points d'influence République sur cette planète ; un échec
-//   renforce TOUTES les flottes NPC de ce clan, affaiblit la flotte
-//   assaillante elle-même (losses, comme toute défaite — récupérable en
-//   gagnant d'autres combats) ET renvoie UN SEUL vaisseau de la flotte
-//   (endommagé) se faire réparer sur Kuat — pas toute la flotte.
+//   et engage TOUTE LA COALITION RÉPUBLIQUE présente sur place à
+//   l'instant (idle, non endommagée) — pas seulement la flotte du
+//   vaisseau qui déclenche l'attaque, toutes les flottes réunies là
+//   comptent (voir republicCoalitionAt) — il en faut au moins
+//   MIN_ATTACK_FLEET_SIZE réunis, sinon échec assuré. Une victoire
+//   renforce CHAQUE flotte présente (kills) et fait gagner 7 points
+//   d'influence République sur cette planète ; un échec renforce TOUTES
+//   les flottes NPC de ce clan, affaiblit CHAQUE flotte présente
+//   (losses, comme toute défaite — récupérable en gagnant d'autres
+//   combats) ET renvoie UN SEUL vaisseau (celui qui a déclenché
+//   l'attaque, endommagé) se faire réparer sur Kuat — pas toute la
+//   coalition.
 // Accessible avec le code DU VAISSEAU.
 export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/action">) {
   const { id } = await ctx.params;
@@ -82,6 +87,9 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
   if (ship.code !== code) return NextResponse.json({ error: "code incorrect" }, { status: 403 });
 
   const now = Date.now();
+  if (ship.damaged) {
+    return NextResponse.json({ error: "vaisseau endommagé : doit d'abord rallier Kuat" }, { status: 400 });
+  }
   if (ship.action_ends_at && new Date(ship.action_ends_at).getTime() > now) {
     return NextResponse.json({ error: "le vaisseau est déjà occupé" }, { status: 400 });
   }
@@ -111,6 +119,49 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
       { error: `cette action n'est pas disponible sur ${planet.name}` },
       { status: 400 },
     );
+  }
+
+  // coalition République présente sur une planète à l'instant : TOUS
+  // les vaisseaux idle et non endommagés, quelle que soit leur flotte —
+  // une attaque de planète engage tout le monde présent, pas seulement
+  // la flotte du vaisseau qui la déclenche. Chaque flotte apporte sa
+  // propre force (vaisseaux + expérience de combat), sommées ensemble.
+  async function republicCoalitionAt(planetName: string) {
+    const rows = await db.sql<{
+      id: string;
+      fleet_id: string;
+      category: string | null;
+      x: number;
+      y: number;
+      dest_x: number | null;
+      dest_y: number | null;
+      departed_at: string | null;
+      arrival_at: string | null;
+      path: Waypoint[] | null;
+    }>`
+      select s.id, s.fleet_id, s.category, s.x, s.y, s.dest_x, s.dest_y, s.departed_at, s.arrival_at, s.path
+      from ships s
+      join fleets f on f.id = s.fleet_id
+      where f.faction = 'republique' and f.is_npc = false and s.damaged = false and s.encounter_pending = false
+    `;
+    const positions = new Map(rows.map((s) => [s.id, currentPosition(s)]));
+    const present = rows.filter((s) => {
+      const p = positions.get(s.id)!;
+      return !p.traveling && nearestPlanet(p.x, p.y).name === planetName;
+    });
+    const fleetIds = [...new Set(present.map((s) => s.fleet_id))];
+    const fleetRows = fleetIds.length
+      ? await db.sql<{ id: string; kills: number; losses: number }>`
+          select id, kills, losses from fleets where id = any(${fleetIds}::uuid[])
+        `
+      : [];
+    const fleetRowById = new Map(fleetRows.map((f) => [f.id, f]));
+    const strength = fleetIds.reduce((sum, fleetId) => {
+      const group = present.filter((s) => s.fleet_id === fleetId);
+      const fleetRow = fleetRowById.get(fleetId);
+      return sum + fleetStrength(group, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0);
+    }, 0);
+    return { present, positions, fleetIds, strength };
   }
 
   if (type === "humanitarian") {
@@ -189,73 +240,47 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
   }
 
   if (type === "attack_preview") {
-    // reconnaissance : une estimation, basée sur toute la flotte, sans
-    // exiger qu'elle soit rassemblée ici — juste informatif, n'engage rien
-    const fleetShipsAll = await db.sql<{ category: string | null }>`
-      select category from ships where fleet_id = ${ship.fleet_id}::uuid
-    `;
-    const [fleetRow] = await db.sql<{ kills: number; losses: number }>`
-      select kills, losses from fleets where id = ${ship.fleet_id}::uuid
-    `;
+    // reconnaissance : mêmes chances que l'attaque réelle donnerait
+    // MAINTENANT (toute la coalition République présente sur place) —
+    // n'engage rien, mais ne ment pas non plus sur ce qu'un vrai "Attaquer"
+    // produirait dans la foulée.
+    const coalition = await republicCoalitionAt(planet.name);
     const minFleetSize = minAttackFleetSize(planet);
-    const tooSmall = fleetShipsAll.length < minFleetSize;
-    const winChance = tooSmall
-      ? 0
-      : rollEncounterOdds(fleetStrength(fleetShipsAll, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0), enemyMultiplier);
+    const tooSmall = coalition.present.length < minFleetSize;
+    const winChance = tooSmall ? 0 : rollEncounterOdds(coalition.strength, enemyMultiplier);
     return NextResponse.json({
       ok: true,
       type,
       planet: planet.name,
       winChance,
-      fleetSize: fleetShipsAll.length,
+      fleetSize: coalition.present.length,
       minFleetSize,
     });
   }
 
-  // attaquer la planète : il faut TOUTE la flotte rassemblée sur place
-  // (chaque vaisseau, idle, sur cette planète) — pas juste celui-ci — et
-  // au moins MIN_ATTACK_FLEET_SIZE vaisseaux, sinon échec assuré.
-  const fleetShips = await db.sql<{
-    id: string;
-    category: string | null;
-    x: number;
-    y: number;
-    dest_x: number | null;
-    dest_y: number | null;
-    departed_at: string | null;
-    arrival_at: string | null;
-    path: Waypoint[] | null;
-    damaged: boolean;
-    encounter_pending: boolean;
-  }>`
-    select id, category, x, y, dest_x, dest_y, departed_at, arrival_at, path, damaged, encounter_pending
-    from ships where fleet_id = ${ship.fleet_id}::uuid
-  `;
-  const shipPositions = new Map(fleetShips.map((s) => [s.id, currentPosition(s)]));
-  const allGathered = fleetShips.every((s) => {
-    if (s.damaged || s.encounter_pending) return false;
-    const sPos = shipPositions.get(s.id)!;
-    if (sPos.traveling) return false;
-    return nearestPlanet(sPos.x, sPos.y).name === planet.name;
-  });
-  if (!allGathered) {
+  // attaquer la planète : compte TOUS les vaisseaux République présents
+  // sur place à l'instant — idle, non endommagés — quelle que soit leur
+  // flotte, pas seulement celle du vaisseau qui lance l'attaque. Chaque
+  // flotte présente apporte sa propre force (vaisseaux + expérience de
+  // combat) au total ; il en faut au moins MIN_ATTACK_FLEET_SIZE réunis
+  // sur place, sinon échec assuré.
+  const coalition = await republicCoalitionAt(planet.name);
+  if (!coalition.present.some((s) => s.id === ship.id)) {
     return NextResponse.json(
       { error: `toute la flotte doit être rassemblée sur ${planet.name} pour attaquer` },
       { status: 400 },
     );
   }
-
-  const [fleetRow] = await db.sql<{ kills: number; losses: number }>`
-    select kills, losses from fleets where id = ${ship.fleet_id}::uuid
-  `;
+  const { present: presentShips, positions: shipPositions, fleetIds: presentFleetIds, strength } = coalition;
   const minFleetSize = minAttackFleetSize(planet);
-  const tooSmall = fleetShips.length < minFleetSize;
-  const strength = fleetStrength(fleetShips, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0);
+  const tooSmall = presentShips.length < minFleetSize;
   const winChance = tooSmall ? 0 : rollEncounterOdds(strength, enemyMultiplier);
   const won = !tooSmall && rollCombatWin(winChance);
 
   if (won) {
-    await db.sql`update fleets set kills = kills + 1, updated_at = now() where id = ${ship.fleet_id}::uuid`;
+    for (const fleetId of presentFleetIds) {
+      await db.sql`update fleets set kills = kills + 1, updated_at = now() where id = ${fleetId}::uuid`;
+    }
     // +7 points d'influence République sur cette planète
     await db.sql`
       insert into planet_influence (planet_name, republic_pct)
@@ -265,18 +290,20 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
     `;
   } else {
     // l'attaque échoue : tout le clan visé (pas juste une flotte) en
-    // ressort plus fort, et la flotte assaillante elle-même en ressort
-    // affaiblie (losses, comme toute défaite) — récupérable en gagnant
-    // d'autres combats, via la même formule que fleetStrength
+    // ressort plus fort, et CHAQUE flotte présente en ressort affaiblie
+    // (losses, comme toute défaite) — récupérable en gagnant d'autres
+    // combats, via la même formule que fleetStrength
     await db.sql`
       update fleets set kills = kills + 1, updated_at = now()
       where is_npc = true and faction = ${planet.faction}
     `;
-    await db.sql`update fleets set losses = losses + 1, updated_at = now() where id = ${ship.fleet_id}::uuid`;
+    for (const fleetId of presentFleetIds) {
+      await db.sql`update fleets set losses = losses + 1, updated_at = now() where id = ${fleetId}::uuid`;
+    }
 
     // seul CE vaisseau (celui qui a lancé l'attaque) est repoussé,
     // endommagé, et renvoyé se faire réparer sur Kuat — pas toute la
-    // flotte assaillante
+    // coalition assaillante
     const retreatPath = shortestPath(planet.name, "Kuat");
     if (retreatPath) {
       const sPos = shipPositions.get(ship.id)!;
@@ -306,7 +333,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
     planet: planet.name,
     outcome: won ? "won" : "lost",
     winChance,
-    fleetSize: fleetShips.length,
+    fleetSize: presentShips.length,
     minFleetSize,
   });
 }
