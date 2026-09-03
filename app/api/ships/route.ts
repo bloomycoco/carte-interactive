@@ -36,6 +36,10 @@ type ShipRow = {
   action_type: "influence" | "seized" | null;
   action_started_at: string | null;
   action_ends_at: string | null;
+  quest_type: "humanitarian" | null;
+  quest_origin_planet: string | null;
+  quest_target_planet: string | null;
+  quest_phase: "fetching" | "returning" | null;
 };
 
 // Liste publique de tous les vaisseaux, pour les afficher sur la carte.
@@ -54,7 +58,8 @@ export async function GET() {
            s.x, s.y, s.dest_x, s.dest_y, s.dest_planet,
            s.departed_at, s.arrival_at, s.path, s.damaged,
            s.encounter_pending, s.encounter_at, s.encounter_win_chance, s.encounter_enemy_faction,
-           s.encounter_npc_ship_id, s.action_type, s.action_started_at, s.action_ends_at
+           s.encounter_npc_ship_id, s.action_type, s.action_started_at, s.action_ends_at,
+           s.quest_type, s.quest_origin_planet, s.quest_target_planet, s.quest_phase
     from ships s
     join fleets f on f.id = s.fleet_id
     order by s.created_at asc

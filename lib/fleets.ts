@@ -88,6 +88,23 @@ export function positionAt(
   );
 }
 
+// Fraction des planètes les plus éloignées (par distance à vol d'oiseau)
+// parmi lesquelles piocher la cible d'une quête d'aide humanitaire — pour
+// que ce soit toujours loin, jamais la planète juste à côté.
+const HUMANITARIAN_FAR_FRACTION = 0.35;
+
+// Choisit, pour une quête d'aide humanitaire déclenchée sur `origin`, une
+// planète lointaine où aller chercher des vivres (n'importe quel clan —
+// l'aide humanitaire va chercher des ressources où elle peut).
+export function pickHumanitarianQuestTarget(origin: Planet): Planet {
+  const others = PLANETS.filter((p) => p.name !== origin.name)
+    .map((p) => ({ p, d: Math.hypot(p.x - origin.x, p.y - origin.y) }))
+    .sort((a, b) => b.d - a.d);
+  const poolSize = Math.max(1, Math.round(others.length * HUMANITARIAN_FAR_FRACTION));
+  const pool = others.slice(0, poolSize);
+  return pool[crypto.randomInt(pool.length)].p;
+}
+
 // Choisit une destination aléatoire ET son trajet pour une flotte NPC :
 // une planète de son propre clan, ATTEIGNABLE sans jamais quitter le
 // territoire de ce clan (le chemin lui-même est restreint aux planètes

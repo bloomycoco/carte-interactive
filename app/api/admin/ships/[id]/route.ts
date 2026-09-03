@@ -41,6 +41,7 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/ship
           path = null, departed_at = null, arrival_at = null, damaged = false,
           encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
           action_type = null, action_started_at = null, action_ends_at = null,
+          quest_type = null, quest_origin_planet = null, quest_target_planet = null, quest_phase = null,
           updated_at = now()
       where id = ${id}::uuid
     `;

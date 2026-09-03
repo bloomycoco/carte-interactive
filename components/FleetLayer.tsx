@@ -25,6 +25,8 @@ export default function FleetLayer({
         let status = s.dest_planet ? `${label} — en route vers ${s.dest_planet}` : `${label} — à quai`;
         if (pos.stuck) status = `${label} — flotte ennemie en vue !`;
         else if (busy) status = `${label} — ${ACTION_LABEL[s.action_type ?? "influence"]}`;
+        else if (s.quest_type === "humanitarian")
+          status += s.quest_phase === "fetching" ? " (chercher des vivres)" : " (ramener les vivres)";
         else if (s.damaged) status += " (endommagé)";
         return (
           <div

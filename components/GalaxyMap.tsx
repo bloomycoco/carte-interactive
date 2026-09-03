@@ -291,9 +291,9 @@ export default function GalaxyMap() {
   const [triggeringAction, setTriggeringAction] = useState<string | null>(null);
 
   // pour un vaisseau contrôlé, à l'arrêt : planète actuelle + action
-  // disponible (aide humanitaire sur un monde neutre, propagation
-  // d'influence sur un monde ennemi) — null si en trajet, occupé, ou
-  // sur un monde qui n'offre aucune action volontaire
+  // disponible (aide humanitaire sur un monde neutre — ou une étape de
+  // sa quête en cours —, propagation d'influence sur un monde ennemi) —
+  // null si en trajet, occupé, ou sur un monde qui n'offre aucune action
   function idlePlanetAction(unlocked: UnlockedShip) {
     const live = ships.find((s) => s.id === unlocked.id);
     if (!live) return null;
@@ -302,7 +302,11 @@ export default function GalaxyMap() {
     if (isActionActive(live, now)) return null;
     if (live.encounter_pending) return null;
     const planet = nearestPlanet(pos.x, pos.y);
-    const action = availablePlanetAction(planet.faction, unlocked.faction);
+    const quest =
+      live.quest_type === "humanitarian" && live.quest_origin_planet && live.quest_target_planet && live.quest_phase
+        ? { originPlanet: live.quest_origin_planet, targetPlanet: live.quest_target_planet, phase: live.quest_phase }
+        : null;
+    const action = availablePlanetAction(planet.name, planet.faction, unlocked.faction, quest);
     return action ? { planet, action } : null;
   }
 
@@ -326,8 +330,12 @@ export default function GalaxyMap() {
       }
       const msg =
         type === "humanitarian"
-          ? `${unlocked.name} apporte une aide humanitaire à ${data.planet}.`
-          : `${unlocked.name} propage l'influence sur ${data.planet} (15 min, immobilisé).`;
+          ? `${unlocked.name} part chercher des vivres sur ${data.target} pour l'aide humanitaire à ${data.planet}.`
+          : type === "humanitarian_pickup"
+            ? `${unlocked.name} récupère les vivres et repart vers ${data.origin}.`
+            : type === "humanitarian_deliver"
+              ? `${unlocked.name} livre l'aide humanitaire à ${data.planet}. Mission accomplie !`
+              : `${unlocked.name} propage l'influence sur ${data.planet} (15 min, immobilisé).`;
       setFleetNotice(msg);
     } catch {
       setFleetNotice("erreur réseau");
@@ -712,6 +720,11 @@ export default function GalaxyMap() {
                                 ? `→ ${live.dest_planet}`
                                 : "à quai"}
                             {pos?.traveling ? " (en transit)" : ""}
+                            {live?.quest_type === "humanitarian"
+                              ? live.quest_phase === "fetching"
+                                ? " — vivres"
+                                : " — retour vivres"
+                              : ""}
                           </span>
                           {available && (
                             <button

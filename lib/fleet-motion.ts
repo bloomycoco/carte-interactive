@@ -41,6 +41,15 @@ export type ShipTravelState = {
   action_type?: "influence" | "seized" | null;
   action_started_at?: string | null;
   action_ends_at?: string | null;
+  // quête d'aide humanitaire en cours (monde neutre) : le vaisseau va
+  // chercher des vivres sur quest_target_planet (phase "fetching") puis
+  // les ramener sur quest_origin_planet (phase "returning") — le trajet
+  // lui-même utilise dest_planet/path/departed_at/arrival_at comme
+  // n'importe quel ordre normal, ces champs ne font que le qualifier.
+  quest_type?: "humanitarian" | null;
+  quest_origin_planet?: string | null;
+  quest_target_planet?: string | null;
+  quest_phase?: "fetching" | "returning" | null;
 };
 
 // Vrai si une action de surface (influence/saisie) est active MAINTENANT
