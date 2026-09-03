@@ -4,17 +4,20 @@ import {
   currentPosition,
   generateCode,
   planTravelAlongPath,
+  planNpcRouteTo,
   pickNpcFleetFlavor,
   pickNpcRoute,
   pickNpcSpawnPlanet,
+  rollCombatWin,
   rollEncounterOdds,
   ENCOUNTER_PROXIMITY,
   NPC_FACTIONS,
   NPC_FLEET_TARGET_COUNT,
+  NPC_RESPAWN_SECONDS,
   type Faction,
   type Waypoint,
 } from "@/lib/fleets";
-import { nearestPlanet } from "@/lib/routes";
+import { nearestPlanet, shortestPath } from "@/lib/routes";
 import { fleetStrength } from "@/lib/ship-classes";
 
 type ShipRow = {
@@ -53,7 +56,9 @@ type ShipRow = {
 // 0) chaque camp NPC garde toujours 3 flottes sur la carte (une flotte
 //    détruite au combat réapparaît après son délai de respawn) ;
 // 1) les flottes NPC à quai reprennent la route vers une planète de leur
-//    propre clan ; 2) un vaisseau République en transit qui passe près
+//    propre clan — sauf le CSI qui rapplique en masse si la République
+//    répand son influence sur un de ses mondes (1.5 : combat forcé s'il
+//    la rattrape) ; 2) un vaisseau République en transit qui passe près
 //    d'un NPC en transit déclenche une vraie rencontre.
 // Ni le code du vaisseau ni celui de sa flotte ne sont renvoyés ici.
 export async function GET() {
@@ -153,12 +158,28 @@ export async function GET() {
     }
   }
 
-  // 1) flottes NPC à quai : reprennent la route vers une planète de leur
-  // propre clan (jamais hors de leur territoire)
+  // 1) flottes NPC : à quai, reprennent la route vers une planète de leur
+  // propre clan (jamais hors de leur territoire). Exception : si la
+  // République répand son influence sur un monde CSI en ce moment, TOUS
+  // les vaisseaux CSI (même en trajet ailleurs) rappliquent aussitôt vers
+  // la menace la plus proche pour tenter de l'intercepter (voir l'étape
+  // 1.5 plus bas pour le combat forcé qui s'ensuit s'ils l'atteignent).
+  const influenceThreats = ships
+    .filter(
+      (s) =>
+        !s.is_npc &&
+        s.faction === "republique" &&
+        s.action_type === "influence" &&
+        s.action_started_at &&
+        s.action_ends_at &&
+        new Date(s.action_started_at).getTime() <= now &&
+        new Date(s.action_ends_at).getTime() > now,
+    )
+    .map((s) => ({ ship: s, planet: nearestPlanet(s.x, s.y) }))
+    .filter((t) => t.planet.faction === "csi");
+
   for (const ship of ships) {
-    if (!ship.is_npc) continue;
-    const pos = currentPosition(ship, now);
-    if (pos.traveling || ship.damaged) continue;
+    if (!ship.is_npc || ship.damaged || ship.encounter_pending) continue;
     if (
       ship.action_ends_at &&
       ship.action_started_at &&
@@ -167,6 +188,59 @@ export async function GET() {
     ) {
       continue;
     }
+
+    const pos = currentPosition(ship, now);
+
+    if (ship.faction === "csi" && influenceThreats.length > 0) {
+      let closest = influenceThreats[0];
+      let closestDist = Math.hypot(closest.planet.x - pos.x, closest.planet.y - pos.y);
+      for (const t of influenceThreats.slice(1)) {
+        const d = Math.hypot(t.planet.x - pos.x, t.planet.y - pos.y);
+        if (d < closestDist) {
+          closest = t;
+          closestDist = d;
+        }
+      }
+
+      // déjà en route vers cette menace précise : on ne réinitialise pas
+      // sa progression, il n'y a rien à faire de plus ce passage-ci
+      if (ship.dest_planet !== closest.planet.name) {
+        const originPlanet = nearestPlanet(pos.x, pos.y);
+        const routePath = planNpcRouteTo(ship.faction, originPlanet.name, closest.planet.name);
+        if (routePath) {
+          const dest = closest.planet;
+          const firstHop = routePath[0];
+          const startsAtFirstHop = firstHop.x === pos.x && firstHop.y === pos.y;
+          const waypoints: Waypoint[] = [
+            { x: pos.x, y: pos.y },
+            ...(startsAtFirstHop ? routePath.slice(1) : routePath).map((p) => ({ x: p.x, y: p.y })),
+          ];
+          const { departedAt, arrivalAt } = planTravelAlongPath(waypoints);
+
+          await db.sql`
+            update ships
+            set x = ${pos.x}, y = ${pos.y}, dest_x = ${dest.x}, dest_y = ${dest.y}, dest_planet = ${dest.name},
+                path = ${JSON.stringify(waypoints)}::jsonb,
+                departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
+                updated_at = now()
+            where id = ${ship.id}::uuid
+          `;
+          ship.x = pos.x;
+          ship.y = pos.y;
+          ship.dest_x = dest.x;
+          ship.dest_y = dest.y;
+          ship.dest_planet = dest.name;
+          ship.path = waypoints;
+          ship.departed_at = departedAt.toISOString();
+          ship.arrival_at = arrivalAt.toISOString();
+        }
+      }
+      continue;
+    }
+
+    // pas de menace pour ce vaisseau : comportement normal, seules les
+    // flottes à quai reprennent une nouvelle destination
+    if (pos.traveling) continue;
 
     const originPlanet = nearestPlanet(pos.x, pos.y);
     const route = pickNpcRoute(ship.faction, originPlanet.name);
@@ -196,6 +270,90 @@ export async function GET() {
     ship.path = waypoints;
     ship.departed_at = departedAt.toISOString();
     ship.arrival_at = arrivalAt.toISOString();
+  }
+
+  // 1.5) un vaisseau CSI qui rattrape (proximité < ENCOUNTER_PROXIMITY)
+  // un vaisseau République en pleine propagation d'influence sur son
+  // monde engage un combat IMMÉDIAT, sans possibilité de fuir ou
+  // négocier : surpris en flagrant délit. L'opération est de toute façon
+  // annulée, que le combat soit gagné ou perdu.
+  for (const { ship: republicShip } of influenceThreats) {
+    if (republicShip.action_type !== "influence") continue; // déjà traité plus haut ce passage-ci
+
+    let caught: ShipRow | null = null;
+    for (const s of ships) {
+      if (!s.is_npc || s.faction !== "csi" || s.damaged || s.encounter_pending) continue;
+      const sPos = currentPosition(s, now);
+      if (Math.hypot(sPos.x - republicShip.x, sPos.y - republicShip.y) < ENCOUNTER_PROXIMITY) {
+        caught = s;
+        break;
+      }
+    }
+    if (!caught) continue;
+
+    const fleetShips = ships.filter((s) => s.fleet_id === republicShip.fleet_id);
+    const [fleetRow] = await db.sql<{ kills: number; losses: number }>`
+      select kills, losses from fleets where id = ${republicShip.fleet_id}::uuid
+    `;
+    const strength = fleetStrength(fleetShips, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0);
+    const won = rollCombatWin(rollEncounterOdds(strength));
+
+    if (won) {
+      await db.sql`
+        update ships
+        set action_type = null, action_started_at = null, action_ends_at = null, updated_at = now()
+        where id = ${republicShip.id}::uuid
+      `;
+      republicShip.action_type = null;
+      republicShip.action_started_at = null;
+      republicShip.action_ends_at = null;
+      await db.sql`update fleets set kills = kills + 1, updated_at = now() where id = ${republicShip.fleet_id}::uuid`;
+
+      const respawnAt = new Date(now + NPC_RESPAWN_SECONDS * 1000).toISOString();
+      await db.sql`delete from ships where id = ${caught.id}::uuid`;
+      await db.sql`
+        update fleets set losses = losses + 1, respawn_at = ${respawnAt}, updated_at = now()
+        where id = ${caught.fleet_id}::uuid
+      `;
+      const idx = ships.indexOf(caught);
+      if (idx !== -1) ships.splice(idx, 1);
+    } else {
+      const originPlanet = nearestPlanet(republicShip.x, republicShip.y);
+      const retreatPath = shortestPath(originPlanet.name, "Coruscant");
+      if (retreatPath) {
+        const firstHop = retreatPath[0];
+        const startsAtFirstHop = firstHop.x === republicShip.x && firstHop.y === republicShip.y;
+        const waypoints: Waypoint[] = [
+          { x: republicShip.x, y: republicShip.y },
+          ...(startsAtFirstHop ? retreatPath.slice(1) : retreatPath).map((p) => ({ x: p.x, y: p.y })),
+        ];
+        const { departedAt, arrivalAt } = planTravelAlongPath(waypoints);
+        const dest = waypoints[waypoints.length - 1];
+
+        await db.sql`
+          update ships
+          set x = ${republicShip.x}, y = ${republicShip.y},
+              dest_x = ${dest.x}, dest_y = ${dest.y}, dest_planet = 'Coruscant',
+              path = ${JSON.stringify(waypoints)}::jsonb,
+              departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
+              damaged = true,
+              action_type = null, action_started_at = null, action_ends_at = null,
+              updated_at = now()
+          where id = ${republicShip.id}::uuid
+        `;
+        republicShip.dest_x = dest.x;
+        republicShip.dest_y = dest.y;
+        republicShip.dest_planet = "Coruscant";
+        republicShip.path = waypoints;
+        republicShip.departed_at = departedAt.toISOString();
+        republicShip.arrival_at = arrivalAt.toISOString();
+        republicShip.damaged = true;
+        republicShip.action_type = null;
+        republicShip.action_started_at = null;
+        republicShip.action_ends_at = null;
+      }
+      await db.sql`update fleets set losses = losses + 1, updated_at = now() where id = ${republicShip.fleet_id}::uuid`;
+    }
   }
 
   // 2) rencontres réelles : un vaisseau République en transit qui croise

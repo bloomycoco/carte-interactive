@@ -271,3 +271,18 @@ export function pickNpcRoute(
   if (!destination) return null;
   return { destination, path };
 }
+
+// Comme pickNpcRoute, mais vers une destination précise plutôt que
+// tirée au sort — sans jamais quitter le territoire du clan. Utilisé
+// quand un camp NPC doit converger vers un endroit précis (le CSI qui
+// rapplique là où la République répand son influence sur un de ses
+// mondes) plutôt que se balader au hasard.
+export function planNpcRouteTo(
+  faction: Faction,
+  currentPlanetName: string,
+  destinationName: string,
+): Planet[] | null {
+  const allowed = new Set(PLANETS.filter((p) => p.faction === faction).map((p) => p.name));
+  if (!allowed.has(destinationName)) return null;
+  return shortestPath(currentPlanetName, destinationName, allowed);
+}
