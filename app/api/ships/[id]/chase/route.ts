@@ -1,14 +1,15 @@
 import { getDatabase } from "@/lib/db";
 import { NextResponse } from "next/server";
-import { currentPosition, rollEncounterOdds } from "@/lib/fleets";
-import { fleetStrength } from "@/lib/ship-classes";
+import { currentPosition, planShipOrder, CHASE_SPEED_MULTIPLIER, type Faction, type Waypoint } from "@/lib/fleets";
+import { nearestPlanet } from "@/lib/routes";
+import { PLANETS } from "@/lib/planets";
 
-// Prend un NPC en chasse : déclenche IMMÉDIATEMENT une rencontre entre
-// ce vaisseau République et le NPC ciblé, où qu'ils se trouvent — pas
-// besoin d'attendre un croisement fortuit. Résolue ensuite comme une
-// rencontre normale (Combattre / Négocier / Fuir) via
-// POST /api/ships/[id]/resolve-encounter. Accessible avec le code DU
-// VAISSEAU.
+// Prend un NPC en chasse : le vaisseau appelant se lance à sa poursuite
+// (avec un léger boost de vitesse), vers la destination ACTUELLE de la
+// cible — pas de rencontre immédiate. C'est le tick de GET /api/ships
+// qui réoriente la poursuite si la cible change de cap, et déclenche la
+// rencontre (Combattre/Négocier/Fuir) une fois assez proche pour la
+// rattraper. Accessible avec le code DU VAISSEAU.
 export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/chase">) {
   const { id } = await ctx.params;
   const body = await request.json().catch(() => null);
@@ -23,20 +24,21 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
     id: string;
     fleet_id: string;
     code: string;
-    faction: string;
+    faction: Faction;
     x: number;
     y: number;
     dest_x: number | null;
     dest_y: number | null;
     departed_at: string | null;
     arrival_at: string | null;
+    path: Waypoint[] | null;
     damaged: boolean;
     encounter_pending: boolean;
     action_started_at: string | null;
     action_ends_at: string | null;
   }>`
     select s.id, s.fleet_id, s.code, f.faction, s.x, s.y, s.dest_x, s.dest_y,
-           s.departed_at, s.arrival_at, s.damaged, s.encounter_pending,
+           s.departed_at, s.arrival_at, s.path, s.damaged, s.encounter_pending,
            s.action_started_at, s.action_ends_at
     from ships s
     join fleets f on f.id = s.fleet_id
@@ -67,19 +69,21 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
   const targetRows = await db.sql<{
     id: string;
     fleet_id: string;
-    faction: "republique" | "csi" | "mandalore" | "cartel";
+    faction: Faction;
     is_npc: boolean;
     x: number;
     y: number;
     dest_x: number | null;
     dest_y: number | null;
+    dest_planet: string | null;
     departed_at: string | null;
     arrival_at: string | null;
+    path: Waypoint[] | null;
     damaged: boolean;
     encounter_pending: boolean;
   }>`
-    select s.id, s.fleet_id, f.faction, f.is_npc, s.x, s.y, s.dest_x, s.dest_y,
-           s.departed_at, s.arrival_at, s.damaged, s.encounter_pending
+    select s.id, s.fleet_id, f.faction, f.is_npc, s.x, s.y, s.dest_x, s.dest_y, s.dest_planet,
+           s.departed_at, s.arrival_at, s.path, s.damaged, s.encounter_pending
     from ships s
     join fleets f on f.id = s.fleet_id
     where s.id = ${targetId}::uuid
@@ -95,32 +99,35 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
   const pos = currentPosition(ship);
   const targetPos = currentPosition(target);
 
-  const fleetShips = await db.sql<{ category: string | null }>`
-    select category from ships where fleet_id = ${ship.fleet_id}::uuid
-  `;
-  const [fleetRow] = await db.sql<{ kills: number; losses: number }>`
-    select kills, losses from fleets where id = ${ship.fleet_id}::uuid
-  `;
-  const strength = fleetStrength(fleetShips, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0);
-  const winChance = rollEncounterOdds(strength);
-  const encounterAtIso = new Date(now).toISOString();
+  // vise la destination ACTUELLE de la cible (celle où elle se rend déjà,
+  // ou la planète où elle est posée si elle est à quai) — le tick de
+  // GET /api/ships réoriente ensuite si elle en change en cours de route
+  const aimPlanetName =
+    targetPos.traveling && target.dest_planet ? target.dest_planet : nearestPlanet(targetPos.x, targetPos.y).name;
+  const aimPlanet = PLANETS.find((p) => p.name === aimPlanetName);
+  if (!aimPlanet) {
+    return NextResponse.json({ error: "impossible de localiser la cible" }, { status: 500 });
+  }
+
+  const originPlanet = nearestPlanet(pos.x, pos.y);
+  const plan = planShipOrder(pos, originPlanet.name, aimPlanet, ship.faction, CHASE_SPEED_MULTIPLIER);
+  if (!plan) {
+    return NextResponse.json({ error: "aucune route connue vers cette cible" }, { status: 400 });
+  }
 
   const updated = await db.sql`
     update ships
-    set encounter_pending = true, encounter_at = ${encounterAtIso}, encounter_win_chance = ${winChance},
-        encounter_x = ${pos.x}, encounter_y = ${pos.y}, encounter_enemy_faction = ${target.faction},
-        encounter_npc_ship_id = ${target.id}::uuid, encounter_kind = 'chase',
+    set x = ${pos.x}, y = ${pos.y},
+        dest_x = ${plan.destination.x}, dest_y = ${plan.destination.y}, dest_planet = ${plan.destination.name},
+        path = ${JSON.stringify(plan.waypoints)}::jsonb,
+        departed_at = ${plan.departedAt.toISOString()}, arrival_at = ${plan.arrivalAt.toISOString()},
+        chase_target_id = ${target.id}::uuid,
+        encounter_pending = false, encounter_at = null, encounter_win_chance = null,
+        encounter_x = null, encounter_y = null, encounter_enemy_faction = null, encounter_kind = null,
         updated_at = now()
     where id = ${id}::uuid
     returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,
-              damaged, encounter_pending, encounter_at, encounter_win_chance, encounter_enemy_faction
-  `;
-  await db.sql`
-    update ships
-    set encounter_pending = true, encounter_at = ${encounterAtIso},
-        encounter_x = ${targetPos.x}, encounter_y = ${targetPos.y}, encounter_kind = 'chase',
-        updated_at = now()
-    where id = ${target.id}::uuid
+              damaged, encounter_pending, chase_target_id
   `;
 
   return NextResponse.json({ ship: updated[0] });

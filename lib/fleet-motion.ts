@@ -40,6 +40,12 @@ export type ShipTravelState = {
   // délibérément pris le NPC en chasse (Combattre/Négocier/Fuir, comme
   // "transit", mais fuir replie vers Coruscant comme "ground").
   encounter_kind?: "transit" | "ground" | "chase" | null;
+  // poursuite en cours (voir POST /api/ships/[id]/chase) : id du
+  // vaisseau NPC visé, tant qu'il n'a pas été rattrapé (ni abandonné).
+  // Ne fige rien à lui seul — c'est le tick de GET /api/ships qui
+  // réoriente le trajet vers la cible et déclenche la rencontre une
+  // fois assez proche.
+  chase_target_id?: string | null;
   // action en cours à la surface d'une planète (saisie par le Cartel) :
   // le vaisseau est immobilisé entre action_started_at et action_ends_at
   // (une saisie est programmée dès le départ mais ne commence qu'à
@@ -82,6 +88,7 @@ export type PublicShip = ShipTravelState & {
   is_npc: boolean;
   dest_planet: string | null;
   damaged: boolean;
+  chase_target_id: string | null;
 };
 
 // Une flotte "déverrouillée" côté navigateur avec son code : donne accès
@@ -187,9 +194,12 @@ export function currentPosition(s: ShipTravelState, now = Date.now()) {
 // Planifie un trajet le long d'un chemin (liste de points, départ réel
 // inclus) : la durée dépend de la longueur RÉELLE du chemin, pas de la
 // distance à vol d'oiseau — plus c'est loin par les routes, plus c'est long.
-export function planTravelAlongPath(points: Waypoint[]) {
+// speedMultiplier > 1 accélère le trajet (le plancher MIN_TRAVEL_SECONDS
+// est réduit d'autant, sinon un boost ne changerait rien aux petits
+// sauts) — utilisé pour la poursuite d'un NPC (voir CHASE_SPEED_MULTIPLIER).
+export function planTravelAlongPath(points: Waypoint[], speedMultiplier = 1) {
   const total = pathLength(points);
-  const seconds = Math.max(MIN_TRAVEL_SECONDS, total / SHIP_SPEED);
+  const seconds = Math.max(MIN_TRAVEL_SECONDS / speedMultiplier, total / (SHIP_SPEED * speedMultiplier));
   const departedAt = new Date();
   const arrivalAt = new Date(departedAt.getTime() + seconds * 1000);
   return { departedAt, arrivalAt };

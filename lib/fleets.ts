@@ -32,6 +32,18 @@ function randomFraction() {
 // GET /api/ships), pas un tirage abstrait.
 export const ENCOUNTER_PROXIMITY = 120;
 
+// Distance en dessous de laquelle un vaisseau qui poursuit délibérément
+// un NPC (voir POST /api/ships/[id]/chase) est considéré comme l'ayant
+// rattrapé — plus généreuse qu'ENCOUNTER_PROXIMITY car il ne s'agit pas
+// d'un hasard mais d'une chasse volontaire, elle doit aboutir de façon
+// fiable une fois assez proche.
+export const CHASE_CATCH_RADIUS = 180;
+
+// Vitesse en plus pour un vaisseau qui poursuit un NPC — pour qu'une
+// chasse ait une vraie chance de rattraper sa cible plutôt que de la
+// suivre indéfiniment à la même allure.
+export const CHASE_SPEED_MULTIPLIER = 1.5;
+
 // En dessous de ce nombre de vaisseaux (toute la flotte, rassemblée sur
 // place), une attaque de planète ne peut JAMAIS réussir — quelle que
 // soit sa force.
@@ -191,6 +203,7 @@ export function planShipOrder(
   originPlanetName: string,
   destination: Planet,
   shipFaction: Faction,
+  speedMultiplier = 1,
 ): OrderPlan | null {
   const routePath = shortestPath(originPlanetName, destination.name);
   if (!routePath) return null;
@@ -201,7 +214,7 @@ export function planShipOrder(
     { x: origin.x, y: origin.y },
     ...(startsAtFirstHop ? routePath.slice(1) : routePath).map((p) => ({ x: p.x, y: p.y })),
   ];
-  const { departedAt, arrivalAt } = planTravelAlongPath(waypoints);
+  const { departedAt, arrivalAt } = planTravelAlongPath(waypoints, speedMultiplier);
 
   const plan: OrderPlan = {
     destination,

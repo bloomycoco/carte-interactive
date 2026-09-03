@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import {
   currentPosition,
   generateCode,
+  planShipOrder,
   planTravelAlongPath,
   pickNpcFleetFlavor,
   pickNpcRoute,
@@ -10,6 +11,8 @@ import {
   rollCombatWin,
   rollCsiCounterattackStart,
   rollEncounterOdds,
+  CHASE_CATCH_RADIUS,
+  CHASE_SPEED_MULTIPLIER,
   ENCOUNTER_PROXIMITY,
   NPC_FACTIONS,
   NPC_FLEET_TARGET_COUNT,
@@ -50,9 +53,10 @@ type ShipRow = {
   encounter_win_chance: number | null;
   encounter_enemy_faction: Faction | null;
   encounter_npc_ship_id: string | null;
-  encounter_kind: "transit" | "ground" | null;
+  encounter_kind: "transit" | "ground" | "chase" | null;
   encounter_x: number | null;
   encounter_y: number | null;
+  chase_target_id: string | null;
   action_type: "seized" | null;
   action_started_at: string | null;
   action_ends_at: string | null;
@@ -71,8 +75,10 @@ type ShipRow = {
 //    même planète déclenchent une rencontre au sol (choix différents,
 //    et non résolue passé 30s la CSI attaque en premier) ; 2) les
 //    flottes NPC à quai (non figées) reprennent la route vers une
-//    planète de leur propre clan ; 3) un vaisseau République en transit
-//    qui passe près d'un NPC en transit déclenche une vraie rencontre.
+//    planète de leur propre clan ; 2.5) une poursuite volontaire en
+//    cours rattrape sa cible (ou se réoriente si elle a changé de cap) ;
+//    3) un vaisseau République en transit qui passe près d'un NPC en
+//    transit déclenche une vraie rencontre.
 // Ni le code du vaisseau ni celui de sa flotte ne sont renvoyés ici.
 export async function GET() {
   const db = getDatabase();
@@ -83,7 +89,7 @@ export async function GET() {
            s.x, s.y, s.dest_x, s.dest_y, s.dest_planet,
            s.departed_at, s.arrival_at, s.path, s.damaged,
            s.encounter_pending, s.encounter_at, s.encounter_win_chance, s.encounter_enemy_faction,
-           s.encounter_npc_ship_id, s.encounter_kind, s.encounter_x, s.encounter_y,
+           s.encounter_npc_ship_id, s.encounter_kind, s.encounter_x, s.encounter_y, s.chase_target_id,
            s.action_type, s.action_started_at, s.action_ends_at,
            s.quest_type, s.quest_origin_planet, s.quest_target_planet, s.quest_phase
     from ships s
@@ -133,6 +139,7 @@ export async function GET() {
       encounter_kind: null,
       encounter_x: null,
       encounter_y: null,
+      chase_target_id: null,
       action_type: null,
       action_started_at: null,
       action_ends_at: null,
@@ -278,6 +285,92 @@ export async function GET() {
     ship.path = waypoints;
     ship.departed_at = departedAt.toISOString();
     ship.arrival_at = arrivalAt.toISOString();
+  }
+
+  // 2.5) poursuites en cours (voir POST /api/ships/[id]/chase) : un
+  // chasseur rattrape sa cible s'il s'en approche à moins de
+  // CHASE_CATCH_RADIUS — ce qui déclenche la rencontre. Sinon, s'il vise
+  // déjà la bonne destination (celle où va la cible en ce moment), on ne
+  // touche à rien ; sinon on réoriente la poursuite (la cible a changé de
+  // cap, ex: elle vient de reprendre une route au hasard à l'étape 2).
+  const chasers = ships.filter((s) => !s.is_npc && s.chase_target_id && !s.damaged && !s.encounter_pending);
+  for (const ship of chasers) {
+    const target = ships.find((s) => s.id === ship.chase_target_id);
+    if (!target || target.damaged || target.encounter_pending) {
+      await db.sql`update ships set chase_target_id = null, updated_at = now() where id = ${ship.id}::uuid`;
+      ship.chase_target_id = null;
+      continue;
+    }
+
+    const shipPos = currentPosition(ship, now);
+    const targetPos = currentPosition(target, now);
+    const dist = Math.hypot(targetPos.x - shipPos.x, targetPos.y - shipPos.y);
+
+    if (dist <= CHASE_CATCH_RADIUS) {
+      const fleetShips = ships.filter((s) => s.fleet_id === ship.fleet_id);
+      const [fleetRow] = await db.sql<{ kills: number; losses: number }>`
+        select kills, losses from fleets where id = ${ship.fleet_id}::uuid
+      `;
+      const strength = fleetStrength(fleetShips, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0);
+      const winChance = rollEncounterOdds(strength);
+      const encounterAtIso = new Date(now).toISOString();
+
+      await db.sql`
+        update ships
+        set encounter_pending = true, encounter_at = ${encounterAtIso}, encounter_win_chance = ${winChance},
+            encounter_x = ${shipPos.x}, encounter_y = ${shipPos.y}, encounter_enemy_faction = ${target.faction},
+            encounter_npc_ship_id = ${target.id}::uuid, encounter_kind = 'chase', chase_target_id = null,
+            updated_at = now()
+        where id = ${ship.id}::uuid
+      `;
+      ship.encounter_pending = true;
+      ship.encounter_at = encounterAtIso;
+      ship.encounter_win_chance = winChance;
+      ship.encounter_enemy_faction = target.faction;
+      ship.encounter_npc_ship_id = target.id;
+      ship.encounter_kind = "chase";
+      ship.chase_target_id = null;
+
+      await db.sql`
+        update ships
+        set encounter_pending = true, encounter_at = ${encounterAtIso},
+            encounter_x = ${targetPos.x}, encounter_y = ${targetPos.y}, encounter_kind = 'chase',
+            updated_at = now()
+        where id = ${target.id}::uuid
+      `;
+      target.encounter_pending = true;
+      target.encounter_at = encounterAtIso;
+      target.encounter_kind = "chase";
+      continue;
+    }
+
+    const targetAimPlanet =
+      targetPos.traveling && target.dest_planet ? target.dest_planet : nearestPlanet(targetPos.x, targetPos.y).name;
+    if (ship.dest_planet === targetAimPlanet) continue;
+
+    const destPlanet = PLANETS.find((p) => p.name === targetAimPlanet);
+    if (!destPlanet) continue;
+    const originPlanet = nearestPlanet(shipPos.x, shipPos.y);
+    const plan = planShipOrder(shipPos, originPlanet.name, destPlanet, ship.faction, CHASE_SPEED_MULTIPLIER);
+    if (!plan) continue;
+
+    await db.sql`
+      update ships
+      set x = ${shipPos.x}, y = ${shipPos.y},
+          dest_x = ${plan.destination.x}, dest_y = ${plan.destination.y}, dest_planet = ${plan.destination.name},
+          path = ${JSON.stringify(plan.waypoints)}::jsonb,
+          departed_at = ${plan.departedAt.toISOString()}, arrival_at = ${plan.arrivalAt.toISOString()},
+          updated_at = now()
+      where id = ${ship.id}::uuid
+    `;
+    ship.x = shipPos.x;
+    ship.y = shipPos.y;
+    ship.dest_x = plan.destination.x;
+    ship.dest_y = plan.destination.y;
+    ship.dest_planet = plan.destination.name;
+    ship.path = plan.waypoints;
+    ship.departed_at = plan.departedAt.toISOString();
+    ship.arrival_at = plan.arrivalAt.toISOString();
   }
 
   // 3) rencontres réelles : un vaisseau République en transit qui croise
