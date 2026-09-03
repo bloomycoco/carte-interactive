@@ -18,13 +18,13 @@ import { nearestPlanet, shortestPath } from "@/lib/routes";
 // - "ground" (les deux flottes posées sur la même planète, forcément
 //   contre la CSI) : combattre, tenter de passer inaperçu (même
 //   mécanique que négocier, mais ça reste sur place en cas de succès),
-//   ou fuir (toujours réussi, replie vers Coruscant sans dégât) ;
+//   ou fuir (toujours réussi, replie vers Kuat sans dégât) ;
 // - "chase" (le joueur a délibérément pris le NPC en chasse, voir
 //   POST /api/ships/[id]/chase) : combattre, négocier (sauf CSI), ou
-//   fuir (replie vers Coruscant sans dégât, comme "ground" — il n'y a
+//   fuir (replie vers Kuat sans dégât, comme "ground" — il n'y a
 //   pas de trajet en cours à annuler).
 // Une défaite au combat (choisi ou après un échec de négociation/
-// discrétion) endommage le vaisseau et le force à rallier Coruscant ;
+// discrétion) endommage le vaisseau et le force à rallier Kuat ;
 // fuir n'inflige jamais de dégât.
 export async function POST(
   request: Request,
@@ -157,10 +157,10 @@ export async function POST(
   }
 
   async function loseCombat() {
-    // défaite : dégâts + repli forcé vers Coruscant depuis le point exact
+    // défaite : dégâts + repli forcé vers Kuat depuis le point exact
     // de la rencontre
     const originPlanet = nearestPlanet(frozenPos.x, frozenPos.y);
-    const retreatPath = shortestPath(originPlanet.name, "Coruscant");
+    const retreatPath = shortestPath(originPlanet.name, "Kuat");
     if (!retreatPath) {
       return NextResponse.json({ error: "aucune route de repli connue" }, { status: 500 });
     }
@@ -176,7 +176,7 @@ export async function POST(
     const updated = await db.sql`
       update ships
       set x = ${frozenPos.x}, y = ${frozenPos.y},
-          dest_x = ${dest.x}, dest_y = ${dest.y}, dest_planet = 'Coruscant',
+          dest_x = ${dest.x}, dest_y = ${dest.y}, dest_planet = 'Kuat',
           path = ${JSON.stringify(waypoints)}::jsonb,
           departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
           damaged = true,
@@ -194,11 +194,11 @@ export async function POST(
   if (choice === "flee") {
     await releaseNpc();
     if (isGround || isChase) {
-      // au sol ou en chasse : fuir quitte précipitamment vers Coruscant,
+      // au sol ou en chasse : fuir quitte précipitamment vers Kuat,
       // sans dégât (contrairement à une défaite au combat) — il n'y a
       // pas de "trajet en cours" à annuler dans ces deux cas
       const originPlanet = nearestPlanet(frozenPos.x, frozenPos.y);
-      const retreatPath = shortestPath(originPlanet.name, "Coruscant");
+      const retreatPath = shortestPath(originPlanet.name, "Kuat");
       if (!retreatPath) {
         return NextResponse.json({ error: "aucune route de repli connue" }, { status: 500 });
       }
@@ -214,7 +214,7 @@ export async function POST(
       const updated = await db.sql`
         update ships
         set x = ${frozenPos.x}, y = ${frozenPos.y},
-            dest_x = ${dest.x}, dest_y = ${dest.y}, dest_planet = 'Coruscant',
+            dest_x = ${dest.x}, dest_y = ${dest.y}, dest_planet = 'Kuat',
             path = ${JSON.stringify(waypoints)}::jsonb,
             departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
             encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,

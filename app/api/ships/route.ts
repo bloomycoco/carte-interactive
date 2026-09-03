@@ -488,7 +488,7 @@ export async function GET() {
       }
     } else {
       const originPlanet = nearestPlanet(frozenPos.x, frozenPos.y);
-      const retreatPath = shortestPath(originPlanet.name, "Coruscant");
+      const retreatPath = shortestPath(originPlanet.name, "Kuat");
       if (retreatPath) {
         const firstHop = retreatPath[0];
         const startsAtFirstHop = firstHop.x === frozenPos.x && firstHop.y === frozenPos.y;
@@ -501,7 +501,7 @@ export async function GET() {
         await db.sql`
           update ships
           set x = ${frozenPos.x}, y = ${frozenPos.y},
-              dest_x = ${dest.x}, dest_y = ${dest.y}, dest_planet = 'Coruscant',
+              dest_x = ${dest.x}, dest_y = ${dest.y}, dest_planet = 'Kuat',
               path = ${JSON.stringify(waypoints)}::jsonb,
               departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
               damaged = true,

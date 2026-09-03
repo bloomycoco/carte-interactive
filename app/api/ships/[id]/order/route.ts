@@ -4,7 +4,7 @@ import { currentPosition, planShipOrder, shipOrderBlockReason, type Faction, typ
 import { nearestPlanet } from "@/lib/routes";
 import { PLANETS } from "@/lib/planets";
 
-const CORUSCANT = PLANETS.find((p) => p.name === "Coruscant")!;
+const KUAT = PLANETS.find((p) => p.name === "Kuat")!;
 
 // Envoie un vaisseau vers une planète, en suivant le réseau de routes
 // (jamais en ligne droite) — la durée dépend de la distance réelle par
@@ -64,9 +64,8 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
   const blockReason = shipOrderBlockReason(ship, origin, destination.name);
   if (blockReason) return NextResponse.json({ error: blockReason }, { status: 400 });
 
-  const idleAtCoruscant =
-    !origin.traveling && Math.abs(origin.x - CORUSCANT.x) < 1 && Math.abs(origin.y - CORUSCANT.y) < 1;
-  const repaired = ship.damaged && idleAtCoruscant;
+  const idleAtKuat = !origin.traveling && Math.abs(origin.x - KUAT.x) < 1 && Math.abs(origin.y - KUAT.y) < 1;
+  const repaired = ship.damaged && idleAtKuat;
 
   const originPlanet = nearestPlanet(origin.x, origin.y);
   const plan = planShipOrder(origin, originPlanet.name, destination, ship.faction as Faction);

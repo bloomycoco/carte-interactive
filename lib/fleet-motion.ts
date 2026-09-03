@@ -38,7 +38,7 @@ export type ShipTravelState = {
   // "ground" : les deux flottes posées sur la même planète
   // (Combattre/Tenter de passer inaperçu/Fuir). "chase" : le joueur a
   // délibérément pris le NPC en chasse (Combattre/Négocier/Fuir, comme
-  // "transit", mais fuir replie vers Coruscant comme "ground").
+  // "transit", mais fuir replie vers Kuat comme "ground").
   encounter_kind?: "transit" | "ground" | "chase" | null;
   // poursuite en cours (voir POST /api/ships/[id]/chase) : id du
   // vaisseau NPC visé, tant qu'il n'a pas été rattrapé (ni abandonné).

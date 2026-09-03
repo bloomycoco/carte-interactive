@@ -425,7 +425,7 @@ export default function GalaxyMap() {
               ? `${unlocked.name} est passé inaperçu.`
               : data.outcome === "fled"
                 ? `${unlocked.name} a rebroussé chemin pour éviter le combat.`
-                : `${unlocked.name} a perdu le combat — vaisseau endommagé, repli forcé vers Coruscant.`;
+                : `${unlocked.name} a perdu le combat — vaisseau endommagé, repli forcé vers Kuat.`;
       setFleetNotice(msg);
     } catch {
       setFleetNotice("erreur réseau");
@@ -1130,9 +1130,9 @@ export default function GalaxyMap() {
                   : "Négocier réussit presque toujours (sinon, combat). "}
               Fuir est sans risque mais{" "}
               {encounterShip.encounter_kind === "ground" || encounterShip.encounter_kind === "chase"
-                ? "replie le vaisseau vers Coruscant."
+                ? "replie le vaisseau vers Kuat."
                 : "annule le trajet et ramène le vaisseau d'où il venait."}{" "}
-              Combattre et perdre endommage le vaisseau et le force à rallier Coruscant.
+              Combattre et perdre endommage le vaisseau et le force à rallier Kuat.
             </p>
           </div>
         </div>

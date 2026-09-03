@@ -51,7 +51,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
     return NextResponse.json({ error: "seule la République peut prendre un NPC en chasse" }, { status: 400 });
   }
   if (ship.damaged) {
-    return NextResponse.json({ error: "vaisseau endommagé : doit d'abord rallier Coruscant" }, { status: 400 });
+    return NextResponse.json({ error: "vaisseau endommagé : doit d'abord rallier Kuat" }, { status: 400 });
   }
   if (ship.encounter_pending) {
     return NextResponse.json({ error: "une rencontre en cours doit être résolue d'abord" }, { status: 400 });

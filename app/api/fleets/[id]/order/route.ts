@@ -4,7 +4,7 @@ import { currentPosition, planShipOrder, shipOrderBlockReason, type Faction, typ
 import { nearestPlanet } from "@/lib/routes";
 import { PLANETS } from "@/lib/planets";
 
-const CORUSCANT = PLANETS.find((p) => p.name === "Coruscant")!;
+const KUAT = PLANETS.find((p) => p.name === "Kuat")!;
 
 // Envoie TOUS les vaisseaux d'une flotte vers la même planète en un seul
 // ordre — accessible avec le code CAPITAINE de la flotte (distinct du
@@ -78,9 +78,8 @@ export async function POST(request: Request, ctx: RouteContext<"/api/fleets/[id]
       continue;
     }
 
-    const idleAtCoruscant =
-      !origin.traveling && Math.abs(origin.x - CORUSCANT.x) < 1 && Math.abs(origin.y - CORUSCANT.y) < 1;
-    const repaired = ship.damaged && idleAtCoruscant;
+    const idleAtKuat = !origin.traveling && Math.abs(origin.x - KUAT.x) < 1 && Math.abs(origin.y - KUAT.y) < 1;
+    const repaired = ship.damaged && idleAtKuat;
 
     await db.sql`
       update ships

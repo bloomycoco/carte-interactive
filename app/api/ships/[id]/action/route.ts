@@ -25,10 +25,11 @@ import { fleetStrength } from "@/lib/ship-classes";
 //   mais seulement si TOUTE la flotte (chaque vaisseau) est rassemblée
 //   sur place ET compte au moins MIN_ATTACK_FLEET_SIZE vaisseaux (sinon
 //   échec assuré) — une victoire renforce la flotte (kills) et fait
-//   gagner 1 point d'influence République sur cette planète (jamais
-//   plus) ; un échec renforce TOUTES les flottes NPC de ce clan ET
-//   renvoie TOUTE la flotte assaillante, endommagée, se faire réparer
-//   à Coruscant.
+//   gagner 7 points d'influence République sur cette planète ; un échec
+//   renforce TOUTES les flottes NPC de ce clan, affaiblit la flotte
+//   assaillante elle-même (losses, comme toute défaite — récupérable en
+//   gagnant d'autres combats) ET renvoie UN SEUL vaisseau de la flotte
+//   (endommagé) se faire réparer sur Kuat — pas toute la flotte.
 // Accessible avec le code DU VAISSEAU.
 export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/action">) {
   const { id } = await ctx.params;
@@ -247,44 +248,47 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
 
   if (won) {
     await db.sql`update fleets set kills = kills + 1, updated_at = now() where id = ${ship.fleet_id}::uuid`;
-    // +1 point d'influence République sur cette planète, jamais plus
+    // +7 points d'influence République sur cette planète
     await db.sql`
       insert into planet_influence (planet_name, republic_pct)
-      values (${planet.name}, 1)
+      values (${planet.name}, 7)
       on conflict (planet_name) do update
-      set republic_pct = least(100, planet_influence.republic_pct + 1), updated_at = now()
+      set republic_pct = least(100, planet_influence.republic_pct + 7), updated_at = now()
     `;
   } else {
     // l'attaque échoue : tout le clan visé (pas juste une flotte) en
-    // ressort plus fort
+    // ressort plus fort, et la flotte assaillante elle-même en ressort
+    // affaiblie (losses, comme toute défaite) — récupérable en gagnant
+    // d'autres combats, via la même formule que fleetStrength
     await db.sql`
       update fleets set kills = kills + 1, updated_at = now()
       where is_npc = true and faction = ${planet.faction}
     `;
-    // et toute la flotte assaillante est repoussée, endommagée, et
-    // renvoyée à Coruscant pour réparation
-    const retreatPath = shortestPath(planet.name, "Coruscant");
+    await db.sql`update fleets set losses = losses + 1, updated_at = now() where id = ${ship.fleet_id}::uuid`;
+
+    // seul CE vaisseau (celui qui a lancé l'attaque) est repoussé,
+    // endommagé, et renvoyé se faire réparer sur Kuat — pas toute la
+    // flotte assaillante
+    const retreatPath = shortestPath(planet.name, "Kuat");
     if (retreatPath) {
-      for (const s of fleetShips) {
-        const sPos = shipPositions.get(s.id)!;
-        const firstHop = retreatPath[0];
-        const startsAtFirstHop = firstHop.x === sPos.x && firstHop.y === sPos.y;
-        const waypoints: Waypoint[] = [
-          { x: sPos.x, y: sPos.y },
-          ...(startsAtFirstHop ? retreatPath.slice(1) : retreatPath).map((p) => ({ x: p.x, y: p.y })),
-        ];
-        const { departedAt, arrivalAt } = planTravelAlongPath(waypoints);
-        const dest = waypoints[waypoints.length - 1];
-        await db.sql`
-          update ships
-          set x = ${sPos.x}, y = ${sPos.y},
-              dest_x = ${dest.x}, dest_y = ${dest.y}, dest_planet = 'Coruscant',
-              path = ${JSON.stringify(waypoints)}::jsonb,
-              departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
-              damaged = true, updated_at = now()
-          where id = ${s.id}::uuid
-        `;
-      }
+      const sPos = shipPositions.get(ship.id)!;
+      const firstHop = retreatPath[0];
+      const startsAtFirstHop = firstHop.x === sPos.x && firstHop.y === sPos.y;
+      const waypoints: Waypoint[] = [
+        { x: sPos.x, y: sPos.y },
+        ...(startsAtFirstHop ? retreatPath.slice(1) : retreatPath).map((p) => ({ x: p.x, y: p.y })),
+      ];
+      const { departedAt, arrivalAt } = planTravelAlongPath(waypoints);
+      const dest = waypoints[waypoints.length - 1];
+      await db.sql`
+        update ships
+        set x = ${sPos.x}, y = ${sPos.y},
+            dest_x = ${dest.x}, dest_y = ${dest.y}, dest_planet = 'Kuat',
+            path = ${JSON.stringify(waypoints)}::jsonb,
+            departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
+            damaged = true, updated_at = now()
+        where id = ${ship.id}::uuid
+      `;
     }
   }
 

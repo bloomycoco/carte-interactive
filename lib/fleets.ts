@@ -255,7 +255,7 @@ export function planShipOrder(
 
 // Un vaisseau peut-il recevoir un nouvel ordre maintenant ? (rencontre en
 // cours non résolue, action de surface en cours, ou endommagé hors
-// Coruscant) — partagé entre l'ordre individuel et l'ordre groupé.
+// Kuat) — partagé entre l'ordre individuel et l'ordre groupé.
 export function shipOrderBlockReason(
   ship: {
     damaged: boolean;
@@ -279,11 +279,10 @@ export function shipOrderBlockReason(
   ) {
     return "immobilisé pour le moment";
   }
-  const CORUSCANT = PLANETS.find((p) => p.name === "Coruscant")!;
-  const idleAtCoruscant =
-    !origin.traveling && Math.abs(origin.x - CORUSCANT.x) < 1 && Math.abs(origin.y - CORUSCANT.y) < 1;
-  if (ship.damaged && !idleAtCoruscant && destinationName !== "Coruscant") {
-    return "endommagé, doit rejoindre Coruscant";
+  const KUAT = PLANETS.find((p) => p.name === "Kuat")!;
+  const idleAtKuat = !origin.traveling && Math.abs(origin.x - KUAT.x) < 1 && Math.abs(origin.y - KUAT.y) < 1;
+  if (ship.damaged && !idleAtKuat && destinationName !== "Kuat") {
+    return "endommagé, doit rejoindre Kuat";
   }
   return null;
 }
