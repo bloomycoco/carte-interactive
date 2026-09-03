@@ -69,7 +69,9 @@ export default function GalaxyMap() {
   const [ships, setShips] = useState<PublicShip[]>([]);
   // influence République cosmétique par planète (0-100), clé = nom de la
   // planète — voir POST /api/ships/[id]/action ("attack")
-  const [planetInfluence, setPlanetInfluence] = useState<Record<string, number>>({});
+  const [planetInfluence, setPlanetInfluence] = useState<
+    Record<string, { republicPct: number; csiAttackAt: string | null }>
+  >({});
   const [unlockedFleets, setUnlockedFleets] = useState<UnlockedFleet[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -356,6 +358,35 @@ export default function GalaxyMap() {
       setFleetNotice("erreur réseau");
     } finally {
       setReconLoading(false);
+    }
+  }
+
+  // chooser "Prendre en chasse" affiché sous la fiche d'un NPC sélectionné
+  const [chasingNpc, setChasingNpc] = useState(false);
+
+  async function chaseNpc(shipId: string, targetId: string) {
+    const unlocked = unlockedShips.find((u) => u.id === shipId);
+    if (!unlocked) return;
+    setChasingNpc(true);
+    try {
+      const res = await fetch(`/api/ships/${shipId}/chase`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: unlocked.code, targetId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFleetNotice(data.error ?? "échec de la prise en chasse");
+        return;
+      }
+      if (data.ship) {
+        setShips((prev) => prev.map((s) => (s.id === shipId ? { ...s, ...data.ship } : s)));
+      }
+      setSelectedShipId(null);
+    } catch {
+      setFleetNotice("erreur réseau");
+    } finally {
+      setChasingNpc(false);
     }
   }
 
@@ -680,10 +711,13 @@ export default function GalaxyMap() {
     });
   }
 
-  // fiche vaisseau affichée dans le panneau au clic (jamais pour un NPC,
-  // filtré déjà côté FleetLayer — mais on revérifie ici par sécurité)
+  // fiche vaisseau affichée dans le panneau au clic
   const selectedShip = selectedShipId
     ? (ships.find((s) => s.id === selectedShipId && !s.is_npc) ?? null)
+    : null;
+  // fiche NPC affichée au clic — propose de le prendre en chasse
+  const selectedNpc = selectedShipId
+    ? (ships.find((s) => s.id === selectedShipId && s.is_npc) ?? null)
     : null;
 
   // tous les vaisseaux actuellement à quai sur la planète affichée dans
@@ -699,15 +733,29 @@ export default function GalaxyMap() {
 
   // vaisseaux contrôlés, à l'arrêt sur la planète actuellement affichée
   // dans le panneau, avec une action disponible ici (aide humanitaire /
-  // attaquer la planète)
+  // attaquer la planète). "Attaquer" est une action pour TOUTE la flotte
+  // à la fois (déjà exigé par idlePlanetAction, qui vérifie que chaque
+  // vaisseau de la flotte est bien là) : un seul bouton par flotte, pas
+  // un par vaisseau qui la compose.
   const planetShipActions = selected
-    ? unlockedShips
-        .map((u) => {
-          const info = idlePlanetAction(u);
-          if (!info || info.planet.name !== selected.name) return null;
-          return { ship: u, action: info.action };
-        })
-        .filter((v): v is { ship: UnlockedShip; action: PlanetAction } => v !== null)
+    ? (() => {
+        const raw = unlockedShips
+          .map((u) => {
+            const info = idlePlanetAction(u);
+            if (!info || info.planet.name !== selected.name) return null;
+            const live = ships.find((s) => s.id === u.id);
+            return { ship: u, action: info.action, fleetId: live?.fleet_id ?? u.id };
+          })
+          .filter((v): v is { ship: UnlockedShip; action: PlanetAction; fleetId: string } => v !== null);
+
+        const seenAttackFleets = new Set<string>();
+        return raw.filter(({ action, fleetId }) => {
+          if (action !== "attack") return true;
+          if (seenAttackFleets.has(fleetId)) return false;
+          seenAttackFleets.add(fleetId);
+          return true;
+        });
+      })()
     : [];
 
   return (
@@ -775,7 +823,11 @@ export default function GalaxyMap() {
             // 50% d'influence, voir attaquer la planète) se teinte en bleu
             const contested = planetInfluence[p.name];
             const dotColor =
-              contested != null && contested > 50 ? FACTION_META.republique.color : meta.color;
+              contested != null && contested.republicPct > 50 ? FACTION_META.republique.color : meta.color;
+            // une contre-attaque CSI en approche fait clignoter la
+            // planète en rouge pour prévenir le joueur
+            const csiAttackIncoming =
+              contested?.csiAttackAt != null && new Date(contested.csiAttackAt).getTime() > now;
             return (
               <div
                 key={p.name}
@@ -784,6 +836,7 @@ export default function GalaxyMap() {
                   p.capital ? styles.capital : "",
                   isDimmed ? styles.dimmed : "",
                   isActive ? styles.active : "",
+                  csiAttackIncoming ? styles.underAttack : "",
                 ].join(" ")}
                 style={{
                   left: p.x,
@@ -990,15 +1043,23 @@ export default function GalaxyMap() {
         <div className={styles.encounterOverlay}>
           <div className={styles.encounterModal}>
             <div className={styles.encounterTitle}>
-              {encounterShip.encounter_kind === "ground" ? "Flotte ennemie sur la planète" : "Flotte ennemie en approche"}
+              {encounterShip.encounter_kind === "ground"
+                ? "Flotte ennemie sur la planète"
+                : encounterShip.encounter_kind === "chase"
+                  ? "Prise en chasse !"
+                  : "Flotte ennemie en approche"}
             </div>
             <p className={styles.encounterText}>
               <strong>{encounterShip.name}</strong>{" "}
-              {encounterShip.encounter_kind === "ground" ? "partage la planète avec une" : "croise une"}
+              {encounterShip.encounter_kind === "ground"
+                ? "partage la planète avec une"
+                : encounterShip.encounter_kind === "chase"
+                  ? "rattrape une"
+                  : "croise une"}
               {encounterShip.encounter_enemy_faction
                 ? ` flotte ${FACTION_META[encounterShip.encounter_enemy_faction].label}`
                 : " flotte ennemie"}
-              {encounterShip.encounter_kind !== "ground" && encounterShip.dest_planet
+              {encounterShip.encounter_kind === "transit" && encounterShip.dest_planet
                 ? ` sur la route vers ${encounterShip.dest_planet}`
                 : ""}
               . Que fait l&apos;équipage ?
@@ -1063,7 +1124,7 @@ export default function GalaxyMap() {
                   ? "La CSI ne négocie pas. "
                   : "Négocier réussit presque toujours (sinon, combat). "}
               Fuir est sans risque mais{" "}
-              {encounterShip.encounter_kind === "ground"
+              {encounterShip.encounter_kind === "ground" || encounterShip.encounter_kind === "chase"
                 ? "replie le vaisseau vers Coruscant."
                 : "annule le trajet et ramène le vaisseau d'où il venait."}{" "}
               Combattre et perdre endommage le vaisseau et le force à rallier Coruscant.
@@ -1149,7 +1210,7 @@ export default function GalaxyMap() {
         ))}
       </div>
 
-      <div className={`${styles.panel} ${selected || selectedShip ? styles.open : ""}`}>
+      <div className={`${styles.panel} ${selected || selectedShip || selectedNpc ? styles.open : ""}`}>
         <button
           className={styles.panelClose}
           onClick={() => {
@@ -1188,6 +1249,52 @@ export default function GalaxyMap() {
               )}
             </div>
           </div>
+        ) : selectedNpc ? (
+          <div>
+            <div
+              className={styles.panelFaction}
+              style={{ ["--f" as string]: FACTION_META[selectedNpc.faction].color }}
+            >
+              <span className={styles.swatch} />
+              {FACTION_META[selectedNpc.faction].label}
+            </div>
+            <h2>{selectedNpc.name}</h2>
+            <div className={styles.system}>{selectedNpc.category ?? "Type inconnu"}</div>
+            <div className={styles.coords}>
+              <div>
+                DESTINATION{" "}
+                <b>
+                  {selectedNpc.dest_planet
+                    ? selectedNpc.dest_planet
+                    : currentPosition(selectedNpc, now).traveling
+                      ? "—"
+                      : "à quai"}
+                </b>
+              </div>
+            </div>
+            <div className={styles.panelActions}>
+              {unlockedShips.length > 0 ? (
+                unlockedShips.map((u) => (
+                  <button
+                    key={u.id}
+                    className={styles.actionBtn}
+                    disabled={chasingNpc}
+                    onClick={() => chaseNpc(u.id, selectedNpc.id)}
+                  >
+                    ⚔ Prendre en chasse — {u.name}
+                  </button>
+                ))
+              ) : (
+                <button
+                  className={`${styles.actionBtn} ${styles.actionBtnDisabled}`}
+                  disabled
+                  title="Déverrouille un vaisseau (bouton « Mes Flottes ») pour le prendre en chasse"
+                >
+                  Prendre en chasse
+                </button>
+              )}
+            </div>
+          </div>
         ) : selected ? (
           <div style={{ ["--f" as string]: FACTION_META[selected.faction].color }}>
             <div className={styles.panelFaction}>
@@ -1208,15 +1315,30 @@ export default function GalaxyMap() {
             {(selected.faction === "csi" || selected.faction === "mandalore") && (
               <div className={styles.influenceGauge}>
                 <div className={styles.influenceLabel}>
-                  <span>République {planetInfluence[selected.name] ?? 0}%</span>
-                  <span>{FACTION_META[selected.faction].label} {100 - (planetInfluence[selected.name] ?? 0)}%</span>
+                  <span>République {planetInfluence[selected.name]?.republicPct ?? 0}%</span>
+                  <span>
+                    {FACTION_META[selected.faction].label} {100 - (planetInfluence[selected.name]?.republicPct ?? 0)}%
+                  </span>
                 </div>
                 <div className={styles.influenceBar}>
                   <div
                     className={styles.influenceFillRepublic}
-                    style={{ width: `${planetInfluence[selected.name] ?? 0}%` }}
+                    style={{ width: `${planetInfluence[selected.name]?.republicPct ?? 0}%` }}
                   />
                 </div>
+                {planetInfluence[selected.name]?.csiAttackAt &&
+                  new Date(planetInfluence[selected.name]!.csiAttackAt!).getTime() > now && (
+                    <div className={styles.influenceWarning}>
+                      ⚠ Contre-attaque CSI dans{" "}
+                      {Math.max(
+                        0,
+                        Math.floor(
+                          (new Date(planetInfluence[selected.name]!.csiAttackAt!).getTime() - now) / 1000,
+                        ),
+                      )}
+                      s
+                    </div>
+                  )}
               </div>
             )}
             {shipsAtSelectedPlanet.length > 0 && (
@@ -1295,7 +1417,7 @@ export default function GalaxyMap() {
                   onClick={() => handlePlanetAction(ship.id, ship.name, action, selected.name)}
                 >
                   {ACTION_LABEL[action]}
-                  {unlockedShips.length > 1 ? ` — ${ship.name}` : ""}
+                  {action !== "attack" && unlockedShips.length > 1 ? ` — ${ship.name}` : ""}
                 </button>
               ))}
             </div>

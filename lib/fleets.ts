@@ -73,6 +73,20 @@ export function rollCartelSeizure() {
   return randomFraction() < CARTEL_SEIZURE_CHANCE;
 }
 
+// Le CSI tente de reprendre une planète contestée (> 50% d'influence
+// République) : à chaque tick, chance qu'il lance une contre-attaque
+// (annoncée un moment avant de résoudre, voir CSI_COUNTERATTACK_
+// TELEGRAPH_SECONDS) — une victoire CSI reprend d'un coup bien plus de
+// terrain qu'une victoire République n'en gagne (CSI_COUNTERATTACK_
+// INFLUENCE_GAIN, contre +1 point pour une attaque République réussie).
+const CSI_COUNTERATTACK_CHANCE = 0.02;
+export const CSI_COUNTERATTACK_TELEGRAPH_SECONDS = 25;
+export const CSI_COUNTERATTACK_INFLUENCE_GAIN = 10;
+
+export function rollCsiCounterattackStart() {
+  return randomFraction() < CSI_COUNTERATTACK_CHANCE;
+}
+
 // Position d'un vaisseau à un instant donné le long d'un trajet connu
 // (réutilise l'interpolation le long du chemin).
 export function positionAt(

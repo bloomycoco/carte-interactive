@@ -8,15 +8,19 @@ import {
   pickNpcRoute,
   pickNpcSpawnPlanet,
   rollCombatWin,
+  rollCsiCounterattackStart,
   rollEncounterOdds,
   ENCOUNTER_PROXIMITY,
   NPC_FACTIONS,
   NPC_FLEET_TARGET_COUNT,
   NPC_RESPAWN_SECONDS,
+  CSI_COUNTERATTACK_TELEGRAPH_SECONDS,
+  CSI_COUNTERATTACK_INFLUENCE_GAIN,
   type Faction,
   type Waypoint,
 } from "@/lib/fleets";
 import { nearestPlanet, shortestPath } from "@/lib/routes";
+import { PLANETS } from "@/lib/planets";
 import { fleetStrength } from "@/lib/ship-classes";
 
 // Une rencontre au sol non tranchée dans ce délai est résolue
@@ -418,13 +422,70 @@ export async function GET() {
     }
   }
 
+  // 5) le CSI tente de reprendre les planètes qu'il a perdues (> 50%
+  // d'influence République) : une attaque est d'abord annoncée
+  // (csi_attack_at, clignote rouge sur la carte) puis résolue après ce
+  // délai — une victoire CSI reprend d'un coup CSI_COUNTERATTACK_
+  // INFLUENCE_GAIN points, bien plus qu'une victoire République
+  // (+1 seulement).
+  const contestedPlanets = await db.sql<{
+    planet_name: string;
+    republic_pct: number;
+    csi_attack_at: string | null;
+  }>`
+    select planet_name, republic_pct, csi_attack_at from planet_influence where republic_pct > 50
+  `;
+  for (const row of contestedPlanets) {
+    const planet = PLANETS.find((p) => p.name === row.planet_name);
+    if (!planet || planet.faction !== "csi") continue;
+
+    if (!row.csi_attack_at) {
+      if (!rollCsiCounterattackStart()) continue;
+      const attackAt = new Date(now + CSI_COUNTERATTACK_TELEGRAPH_SECONDS * 1000).toISOString();
+      await db.sql`
+        update planet_influence set csi_attack_at = ${attackAt}, updated_at = now()
+        where planet_name = ${row.planet_name}
+      `;
+      row.csi_attack_at = attackAt;
+      continue;
+    }
+    if (new Date(row.csi_attack_at).getTime() > now) continue; // encore en approche
+
+    const csiFleetIds = [...new Set(ships.filter((s) => s.is_npc && s.faction === "csi").map((s) => s.fleet_id))];
+    if (csiFleetIds.length === 0) {
+      await db.sql`update planet_influence set csi_attack_at = null, updated_at = now() where planet_name = ${row.planet_name}`;
+      continue;
+    }
+    const attackerFleetId = csiFleetIds[Math.floor(Math.random() * csiFleetIds.length)];
+    const attackerShips = ships.filter((s) => s.fleet_id === attackerFleetId);
+    const [fleetRow] = await db.sql<{ kills: number; losses: number }>`
+      select kills, losses from fleets where id = ${attackerFleetId}::uuid
+    `;
+    const strength = fleetStrength(attackerShips, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0);
+    const won = rollCombatWin(rollEncounterOdds(strength));
+
+    if (won) {
+      await db.sql`
+        update planet_influence
+        set republic_pct = greatest(0, republic_pct - ${CSI_COUNTERATTACK_INFLUENCE_GAIN}), csi_attack_at = null, updated_at = now()
+        where planet_name = ${row.planet_name}
+      `;
+      await db.sql`update fleets set kills = kills + 1, updated_at = now() where id = ${attackerFleetId}::uuid`;
+    } else {
+      await db.sql`update planet_influence set csi_attack_at = null, updated_at = now() where planet_name = ${row.planet_name}`;
+    }
+  }
+
   // influence République cosmétique par planète attaquée (voir
   // POST /api/ships/[id]/action) — pour teinter la carte et afficher une
-  // jauge au clic sur la planète.
-  const influenceRows = await db.sql<{ planet_name: string; republic_pct: number }>`
-    select planet_name, republic_pct from planet_influence
+  // jauge au clic sur la planète, et signaler une contre-attaque CSI en
+  // approche (csiAttackAt) pour la faire clignoter en rouge.
+  const influenceRows = await db.sql<{ planet_name: string; republic_pct: number; csi_attack_at: string | null }>`
+    select planet_name, republic_pct, csi_attack_at from planet_influence
   `;
-  const planetInfluence = Object.fromEntries(influenceRows.map((r) => [r.planet_name, r.republic_pct]));
+  const planetInfluence = Object.fromEntries(
+    influenceRows.map((r) => [r.planet_name, { republicPct: r.republic_pct, csiAttackAt: r.csi_attack_at }]),
+  );
 
   return NextResponse.json({ ships, planetInfluence });
 }

@@ -36,8 +36,10 @@ export type ShipTravelState = {
   encounter_enemy_faction?: Faction | null;
   // "transit" : croisement en plein vol (Combattre/Négocier/Fuir).
   // "ground" : les deux flottes posées sur la même planète
-  // (Combattre/Tenter de passer inaperçu/Fuir).
-  encounter_kind?: "transit" | "ground" | null;
+  // (Combattre/Tenter de passer inaperçu/Fuir). "chase" : le joueur a
+  // délibérément pris le NPC en chasse (Combattre/Négocier/Fuir, comme
+  // "transit", mais fuir replie vers Coruscant comme "ground").
+  encounter_kind?: "transit" | "ground" | "chase" | null;
   // action en cours à la surface d'une planète (saisie par le Cartel) :
   // le vaisseau est immobilisé entre action_started_at et action_ends_at
   // (une saisie est programmée dès le départ mais ne commence qu'à

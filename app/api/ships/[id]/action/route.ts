@@ -26,7 +26,9 @@ import { fleetStrength } from "@/lib/ship-classes";
 //   sur place ET compte au moins MIN_ATTACK_FLEET_SIZE vaisseaux (sinon
 //   échec assuré) — une victoire renforce la flotte (kills) et fait
 //   gagner 1 point d'influence République sur cette planète (jamais
-//   plus), un échec renforce TOUTES les flottes NPC de ce clan.
+//   plus) ; un échec renforce TOUTES les flottes NPC de ce clan ET
+//   renvoie TOUTE la flotte assaillante, endommagée, se faire réparer
+//   à Coruscant.
 // Accessible avec le code DU VAISSEAU.
 export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/action">) {
   const { id } = await ctx.params;
@@ -221,9 +223,10 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
     select id, category, x, y, dest_x, dest_y, departed_at, arrival_at, path, damaged, encounter_pending
     from ships where fleet_id = ${ship.fleet_id}::uuid
   `;
+  const shipPositions = new Map(fleetShips.map((s) => [s.id, currentPosition(s)]));
   const allGathered = fleetShips.every((s) => {
     if (s.damaged || s.encounter_pending) return false;
-    const sPos = currentPosition(s);
+    const sPos = shipPositions.get(s.id)!;
     if (sPos.traveling) return false;
     return nearestPlanet(sPos.x, sPos.y).name === planet.name;
   });
@@ -258,6 +261,31 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
       update fleets set kills = kills + 1, updated_at = now()
       where is_npc = true and faction = ${planet.faction}
     `;
+    // et toute la flotte assaillante est repoussée, endommagée, et
+    // renvoyée à Coruscant pour réparation
+    const retreatPath = shortestPath(planet.name, "Coruscant");
+    if (retreatPath) {
+      for (const s of fleetShips) {
+        const sPos = shipPositions.get(s.id)!;
+        const firstHop = retreatPath[0];
+        const startsAtFirstHop = firstHop.x === sPos.x && firstHop.y === sPos.y;
+        const waypoints: Waypoint[] = [
+          { x: sPos.x, y: sPos.y },
+          ...(startsAtFirstHop ? retreatPath.slice(1) : retreatPath).map((p) => ({ x: p.x, y: p.y })),
+        ];
+        const { departedAt, arrivalAt } = planTravelAlongPath(waypoints);
+        const dest = waypoints[waypoints.length - 1];
+        await db.sql`
+          update ships
+          set x = ${sPos.x}, y = ${sPos.y},
+              dest_x = ${dest.x}, dest_y = ${dest.y}, dest_planet = 'Coruscant',
+              path = ${JSON.stringify(waypoints)}::jsonb,
+              departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
+              damaged = true, updated_at = now()
+          where id = ${s.id}::uuid
+        `;
+      }
+    }
   }
 
   return NextResponse.json({

@@ -10,7 +10,7 @@ import {
 } from "@/lib/fleets";
 import { nearestPlanet, shortestPath } from "@/lib/routes";
 
-// Résout une rencontre en cours. Deux sortes :
+// Résout une rencontre en cours. Trois sortes :
 // - "transit" (croisement en plein vol) : combattre, négocier le
 //   passage (très souvent réussi, sinon un combat s'engage quand même —
 //   sauf contre la CSI, qui ne négocie jamais), ou fuir (toujours
@@ -18,7 +18,11 @@ import { nearestPlanet, shortestPath } from "@/lib/routes";
 // - "ground" (les deux flottes posées sur la même planète, forcément
 //   contre la CSI) : combattre, tenter de passer inaperçu (même
 //   mécanique que négocier, mais ça reste sur place en cas de succès),
-//   ou fuir (toujours réussi, replie vers Coruscant sans dégât).
+//   ou fuir (toujours réussi, replie vers Coruscant sans dégât) ;
+// - "chase" (le joueur a délibérément pris le NPC en chasse, voir
+//   POST /api/ships/[id]/chase) : combattre, négocier (sauf CSI), ou
+//   fuir (replie vers Coruscant sans dégât, comme "ground" — il n'y a
+//   pas de trajet en cours à annuler).
 // Une défaite au combat (choisi ou après un échec de négociation/
 // discrétion) endommage le vaisseau et le force à rallier Coruscant ;
 // fuir n'inflige jamais de dégât.
@@ -52,7 +56,7 @@ export async function POST(
     encounter_y: number | null;
     encounter_npc_ship_id: string | null;
     encounter_enemy_faction: string | null;
-    encounter_kind: "transit" | "ground" | null;
+    encounter_kind: "transit" | "ground" | "chase" | null;
   }>`
     select id, fleet_id, name, code, path, departed_at, arrival_at, encounter_pending, encounter_at,
            encounter_win_chance, encounter_x, encounter_y, encounter_npc_ship_id, encounter_enemy_faction,
@@ -67,11 +71,13 @@ export async function POST(
     return NextResponse.json({ error: "aucune rencontre en cours" }, { status: 400 });
   }
   const isGround = ship.encounter_kind === "ground";
+  const isChase = ship.encounter_kind === "chase";
   // en transit, la position figée se retrouve via le trajet en cours si
-  // besoin (voir plus bas) — au sol, un vaisseau fraîchement à quai ou
-  // téléporté peut très bien ne pas (ou plus) avoir de trajet du tout,
-  // ce n'est pas nécessaire : encounter_x/y suffit toujours.
-  if (!isGround && (!ship.path || !ship.departed_at || !ship.arrival_at)) {
+  // besoin (voir plus bas) — au sol ou en chasse, un vaisseau fraîchement
+  // à quai (ou qui n'a jamais bougé) peut très bien ne pas avoir de
+  // trajet du tout, ce n'est pas nécessaire : encounter_x/y suffit
+  // toujours.
+  if (!isGround && !isChase && (!ship.path || !ship.departed_at || !ship.arrival_at)) {
     return NextResponse.json({ error: "aucune rencontre en cours" }, { status: 400 });
   }
   if (isGround && choice === "negotiate") {
@@ -187,9 +193,10 @@ export async function POST(
 
   if (choice === "flee") {
     await releaseNpc();
-    if (isGround) {
-      // au sol : fuir quitte précipitamment la planète vers Coruscant,
-      // sans dégât (contrairement à une défaite au combat)
+    if (isGround || isChase) {
+      // au sol ou en chasse : fuir quitte précipitamment vers Coruscant,
+      // sans dégât (contrairement à une défaite au combat) — il n'y a
+      // pas de "trajet en cours" à annuler dans ces deux cas
       const originPlanet = nearestPlanet(frozenPos.x, frozenPos.y);
       const retreatPath = shortestPath(originPlanet.name, "Coruscant");
       if (!retreatPath) {

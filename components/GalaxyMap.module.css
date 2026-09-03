@@ -93,10 +93,15 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .planet.capital .dot { animation: pulse 3.2s ease-in-out infinite; animation-delay: var(--pulse-delay, 0s); }
+  .planet.underAttack .dot { animation: attackBlink 0.8s ease-in-out infinite; }
 }
 @keyframes pulse {
   0%, 100% { filter: brightness(1); }
   50% { filter: brightness(1.4); }
+}
+@keyframes attackBlink {
+  0%, 100% { background: var(--dot-fill); box-shadow: 0 0 0 3px var(--dot-ring), 0 0 12px 2px var(--dot-glow); }
+  50% { background: var(--separatist); box-shadow: 0 0 0 3px var(--dot-ring), 0 0 16px 5px var(--separatist); }
 }
 
 .topbar {
@@ -568,6 +573,12 @@
   height: 100%;
   background: var(--republic);
   transition: width 0.3s ease;
+}
+.influenceWarning {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--separatist);
+  font-weight: 600;
 }
 
 .planetShips {
