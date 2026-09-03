@@ -31,7 +31,10 @@ function computeNearestNeighbourEdges(): RouteEdge[] {
 // Liaisons ajoutées à la main (par nom de planète, jamais par
 // coordonnées — toujours recalculées depuis PLANETS). Bridge Mandalore,
 // isolé du reste du réseau, à Ruusan.
-const MANUAL_ROUTE_NAMES: [string, string][] = [["Zanbar", "Ruusan"]];
+const MANUAL_ROUTE_NAMES: [string, string][] = [
+  ["Zanbar", "Ruusan"],
+  ["Hypori", "Moraband"],
+];
 
 export const ROUTE_EDGES: RouteEdge[] = [
   ...computeNearestNeighbourEdges(),
