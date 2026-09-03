@@ -369,7 +369,7 @@ export default function GalaxyMap() {
       new Date(s.encounter_at).getTime() <= now,
   );
 
-  async function resolveEncounter(shipId: string, choice: "fight" | "negotiate" | "flee") {
+  async function resolveEncounter(shipId: string, choice: "fight" | "negotiate" | "flee" | "sneak") {
     const unlocked = unlockedShips.find((u) => u.id === shipId);
     if (!unlocked) return;
     setResolvingEncounter(true);
@@ -390,9 +390,11 @@ export default function GalaxyMap() {
           ? `${unlocked.name} a repoussé l'ennemi et poursuit sa route !`
           : data.outcome === "negotiated"
             ? `${unlocked.name} a négocié son passage et poursuit sa route.`
-            : data.outcome === "fled"
-              ? `${unlocked.name} a rebroussé chemin pour éviter le combat.`
-              : `${unlocked.name} a perdu le combat — vaisseau endommagé, repli forcé vers Coruscant.`;
+            : data.outcome === "sneaked"
+              ? `${unlocked.name} est passé inaperçu.`
+              : data.outcome === "fled"
+                ? `${unlocked.name} a rebroussé chemin pour éviter le combat.`
+                : `${unlocked.name} a perdu le combat — vaisseau endommagé, repli forcé vers Coruscant.`;
       setFleetNotice(msg);
     } catch {
       setFleetNotice("erreur réseau");
@@ -987,18 +989,36 @@ export default function GalaxyMap() {
       {encounterShip && (
         <div className={styles.encounterOverlay}>
           <div className={styles.encounterModal}>
-            <div className={styles.encounterTitle}>Flotte ennemie en approche</div>
+            <div className={styles.encounterTitle}>
+              {encounterShip.encounter_kind === "ground" ? "Flotte ennemie sur la planète" : "Flotte ennemie en approche"}
+            </div>
             <p className={styles.encounterText}>
-              <strong>{encounterShip.name}</strong> croise une
+              <strong>{encounterShip.name}</strong>{" "}
+              {encounterShip.encounter_kind === "ground" ? "partage la planète avec une" : "croise une"}
               {encounterShip.encounter_enemy_faction
                 ? ` flotte ${FACTION_META[encounterShip.encounter_enemy_faction].label}`
                 : " flotte ennemie"}
-              {encounterShip.dest_planet ? ` sur la route vers ${encounterShip.dest_planet}` : ""}.
-              Que fait l&apos;équipage ?
+              {encounterShip.encounter_kind !== "ground" && encounterShip.dest_planet
+                ? ` sur la route vers ${encounterShip.dest_planet}`
+                : ""}
+              . Que fait l&apos;équipage ?
             </p>
             {encounterShip.encounter_win_chance != null && (
               <p className={styles.encounterOdds}>
                 Chances de victoire au combat : <strong>{encounterShip.encounter_win_chance}%</strong>
+              </p>
+            )}
+            {encounterShip.encounter_kind === "ground" && encounterShip.encounter_at && (
+              <p className={styles.encounterOdds}>
+                Sans décision d&apos;ici{" "}
+                <strong>
+                  {Math.max(
+                    0,
+                    30 - Math.floor((now - new Date(encounterShip.encounter_at).getTime()) / 1000),
+                  )}
+                  s
+                </strong>
+                , la CSI attaque la première — avec l&apos;avantage.
               </p>
             )}
             <div className={styles.encounterActions}>
@@ -1009,14 +1029,24 @@ export default function GalaxyMap() {
               >
                 Combattre{encounterShip.encounter_win_chance != null ? ` (${encounterShip.encounter_win_chance}%)` : ""}
               </button>
-              {encounterShip.encounter_enemy_faction !== "csi" && (
+              {encounterShip.encounter_kind === "ground" ? (
                 <button
                   className={styles.encounterNegotiate}
                   disabled={resolvingEncounter}
-                  onClick={() => resolveEncounter(encounterShip.id, "negotiate")}
+                  onClick={() => resolveEncounter(encounterShip.id, "sneak")}
                 >
-                  Négocier le passage
+                  Tenter de passer inaperçu
                 </button>
+              ) : (
+                encounterShip.encounter_enemy_faction !== "csi" && (
+                  <button
+                    className={styles.encounterNegotiate}
+                    disabled={resolvingEncounter}
+                    onClick={() => resolveEncounter(encounterShip.id, "negotiate")}
+                  >
+                    Négocier le passage
+                  </button>
+                )
               )}
               <button
                 className={styles.encounterFlee}
@@ -1027,10 +1057,15 @@ export default function GalaxyMap() {
               </button>
             </div>
             <p className={styles.encounterHint}>
-              {encounterShip.encounter_enemy_faction === "csi"
-                ? "La CSI ne négocie pas. "
-                : "Négocier réussit presque toujours (sinon, combat). "}
-              Fuir est sans risque mais annule le trajet et ramène le vaisseau d&apos;où il venait.
+              {encounterShip.encounter_kind === "ground"
+                ? "Passer inaperçu réussit presque toujours (sinon, combat). "
+                : encounterShip.encounter_enemy_faction === "csi"
+                  ? "La CSI ne négocie pas. "
+                  : "Négocier réussit presque toujours (sinon, combat). "}
+              Fuir est sans risque mais{" "}
+              {encounterShip.encounter_kind === "ground"
+                ? "replie le vaisseau vers Coruscant."
+                : "annule le trajet et ramène le vaisseau d'où il venait."}{" "}
               Combattre et perdre endommage le vaisseau et le force à rallier Coruscant.
             </p>
           </div>

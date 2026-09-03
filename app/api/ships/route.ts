@@ -7,15 +7,23 @@ import {
   pickNpcFleetFlavor,
   pickNpcRoute,
   pickNpcSpawnPlanet,
+  rollCombatWin,
   rollEncounterOdds,
   ENCOUNTER_PROXIMITY,
   NPC_FACTIONS,
   NPC_FLEET_TARGET_COUNT,
+  NPC_RESPAWN_SECONDS,
   type Faction,
   type Waypoint,
 } from "@/lib/fleets";
-import { nearestPlanet } from "@/lib/routes";
+import { nearestPlanet, shortestPath } from "@/lib/routes";
 import { fleetStrength } from "@/lib/ship-classes";
+
+// Une rencontre au sol non tranchée dans ce délai est résolue
+// automatiquement : la CSI attaque, avec de moins bonnes chances pour la
+// République qu'à l'origine (prise de court).
+const GROUND_ENCOUNTER_TIMEOUT_MS = 30_000;
+const GROUND_ENCOUNTER_TIMEOUT_PENALTY = 20;
 
 type ShipRow = {
   id: string;
@@ -38,6 +46,9 @@ type ShipRow = {
   encounter_win_chance: number | null;
   encounter_enemy_faction: Faction | null;
   encounter_npc_ship_id: string | null;
+  encounter_kind: "transit" | "ground" | null;
+  encounter_x: number | null;
+  encounter_y: number | null;
   action_type: "seized" | null;
   action_started_at: string | null;
   action_ends_at: string | null;
@@ -52,8 +63,11 @@ type ShipRow = {
 // toutes les 4s par chaque onglet ouvert, faute de tâche de fond) :
 // 0) chaque camp NPC garde toujours son nombre de flottes sur la carte
 //    (une flotte détruite au combat réapparaît après son délai de
-//    respawn) ; 1) les flottes NPC à quai reprennent la route vers une
-//    planète de leur propre clan ; 2) un vaisseau République en transit
+//    respawn) ; 1) une flotte République et une flotte CSI posées sur la
+//    même planète déclenchent une rencontre au sol (choix différents,
+//    et non résolue passé 30s la CSI attaque en premier) ; 2) les
+//    flottes NPC à quai (non figées) reprennent la route vers une
+//    planète de leur propre clan ; 3) un vaisseau République en transit
 //    qui passe près d'un NPC en transit déclenche une vraie rencontre.
 // Ni le code du vaisseau ni celui de sa flotte ne sont renvoyés ici.
 export async function GET() {
@@ -65,7 +79,8 @@ export async function GET() {
            s.x, s.y, s.dest_x, s.dest_y, s.dest_planet,
            s.departed_at, s.arrival_at, s.path, s.damaged,
            s.encounter_pending, s.encounter_at, s.encounter_win_chance, s.encounter_enemy_faction,
-           s.encounter_npc_ship_id, s.action_type, s.action_started_at, s.action_ends_at,
+           s.encounter_npc_ship_id, s.encounter_kind, s.encounter_x, s.encounter_y,
+           s.action_type, s.action_started_at, s.action_ends_at,
            s.quest_type, s.quest_origin_planet, s.quest_target_planet, s.quest_phase
     from ships s
     join fleets f on f.id = s.fleet_id
@@ -111,6 +126,9 @@ export async function GET() {
       encounter_win_chance: null,
       encounter_enemy_faction: null,
       encounter_npc_ship_id: null,
+      encounter_kind: null,
+      encounter_x: null,
+      encounter_y: null,
       action_type: null,
       action_started_at: null,
       action_ends_at: null,
@@ -153,12 +171,72 @@ export async function GET() {
     }
   }
 
-  // 1) flottes NPC à quai : reprennent la route vers une planète de leur
-  // propre clan (jamais hors de leur territoire)
+  // 1) rencontres au sol : une flotte République et une flotte CSI (NPC)
+  // posées, idle, sur la MÊME planète (pas en transit) — les deux sont
+  // figées, avec un choix différent (pas de négociation possible avec
+  // le CSI, mais tenter de passer inaperçu). Tourne AVANT le
+  // réassignement des flottes NPC à quai (étape 2) pour ne pas laisser
+  // une flotte CSI repartir avant d'avoir eu la chance d'être détectée.
+  const idleCsiNpc = ships.filter(
+    (s) => s.is_npc && s.faction === "csi" && !s.damaged && !s.encounter_pending && !currentPosition(s, now).traveling,
+  );
+  const idleRepublicShips = ships.filter(
+    (s) => !s.is_npc && s.faction === "republique" && !s.damaged && !s.encounter_pending && !currentPosition(s, now).traveling,
+  );
+
+  for (const ship of idleRepublicShips) {
+    const pos = currentPosition(ship, now);
+    const planet = nearestPlanet(pos.x, pos.y);
+    const csiHere = idleCsiNpc.find((npc) => nearestPlanet(currentPosition(npc, now).x, currentPosition(npc, now).y).name === planet.name);
+    if (!csiHere) continue;
+
+    const fleetShips = ships.filter((s) => s.fleet_id === ship.fleet_id);
+    const [fleetRow] = await db.sql<{ kills: number; losses: number }>`
+      select kills, losses from fleets where id = ${ship.fleet_id}::uuid
+    `;
+    const strength = fleetStrength(fleetShips, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0);
+    const winChance = rollEncounterOdds(strength);
+    const encounterAtIso = new Date(now).toISOString();
+
+    await db.sql`
+      update ships
+      set encounter_pending = true, encounter_at = ${encounterAtIso}, encounter_win_chance = ${winChance},
+          encounter_x = ${pos.x}, encounter_y = ${pos.y}, encounter_enemy_faction = ${csiHere.faction},
+          encounter_npc_ship_id = ${csiHere.id}::uuid, encounter_kind = 'ground',
+          updated_at = now()
+      where id = ${ship.id}::uuid
+    `;
+    ship.encounter_pending = true;
+    ship.encounter_at = encounterAtIso;
+    ship.encounter_win_chance = winChance;
+    ship.encounter_enemy_faction = csiHere.faction;
+    ship.encounter_npc_ship_id = csiHere.id;
+    ship.encounter_kind = "ground";
+    ship.encounter_x = pos.x;
+    ship.encounter_y = pos.y;
+
+    await db.sql`
+      update ships
+      set encounter_pending = true, encounter_at = ${encounterAtIso},
+          encounter_x = ${pos.x}, encounter_y = ${pos.y}, encounter_kind = 'ground',
+          updated_at = now()
+      where id = ${csiHere.id}::uuid
+    `;
+    csiHere.encounter_pending = true;
+    csiHere.encounter_at = encounterAtIso;
+    csiHere.encounter_x = pos.x;
+    csiHere.encounter_y = pos.y;
+    const idx = idleCsiNpc.indexOf(csiHere);
+    if (idx !== -1) idleCsiNpc.splice(idx, 1);
+  }
+
+  // 2) flottes NPC à quai : reprennent la route vers une planète de leur
+  // propre clan (jamais hors de leur territoire) — sauf si elles viennent
+  // d'être figées dans une rencontre au sol à l'instant (étape 1)
   for (const ship of ships) {
     if (!ship.is_npc) continue;
     const pos = currentPosition(ship, now);
-    if (pos.traveling || ship.damaged) continue;
+    if (pos.traveling || ship.damaged || ship.encounter_pending) continue;
     if (
       ship.action_ends_at &&
       ship.action_started_at &&
@@ -198,7 +276,7 @@ export async function GET() {
     ship.arrival_at = arrivalAt.toISOString();
   }
 
-  // 2) rencontres réelles : un vaisseau République en transit qui croise
+  // 3) rencontres réelles : un vaisseau République en transit qui croise
   // un NPC en transit (distance < ENCOUNTER_PROXIMITY) déclenche une
   // rencontre — les DEUX vaisseaux sont figés à leur position actuelle
   // tant qu'elle n'est pas résolue (le NPC ne peut pas non plus bouger).
@@ -238,7 +316,7 @@ export async function GET() {
       update ships
       set encounter_pending = true, encounter_at = ${encounterAtIso}, encounter_win_chance = ${winChance},
           encounter_x = ${pos.x}, encounter_y = ${pos.y}, encounter_enemy_faction = ${closest.faction},
-          encounter_npc_ship_id = ${closest.id}::uuid,
+          encounter_npc_ship_id = ${closest.id}::uuid, encounter_kind = 'transit',
           updated_at = now()
       where id = ${ship.id}::uuid
     `;
@@ -247,13 +325,14 @@ export async function GET() {
     ship.encounter_win_chance = winChance;
     ship.encounter_enemy_faction = closest.faction;
     ship.encounter_npc_ship_id = closest.id;
+    ship.encounter_kind = "transit";
 
     // le vaisseau NPC croisé est lui aussi figé, à la même heure, tant
     // que le joueur République n'a pas tranché
     await db.sql`
       update ships
       set encounter_pending = true, encounter_at = ${encounterAtIso},
-          encounter_x = ${npcPos.x}, encounter_y = ${npcPos.y},
+          encounter_x = ${npcPos.x}, encounter_y = ${npcPos.y}, encounter_kind = 'transit',
           updated_at = now()
       where id = ${closest.id}::uuid
     `;
@@ -262,6 +341,81 @@ export async function GET() {
     // retiré de la liste des cibles disponibles pour ce même passage
     const idx = npcTraveling.indexOf(closest);
     if (idx !== -1) npcTraveling.splice(idx, 1);
+  }
+
+  // 4) rencontre au sol non tranchée depuis GROUND_ENCOUNTER_TIMEOUT_MS :
+  // la CSI attaque automatiquement, avec de moins bonnes chances pour la
+  // République qu'à l'origine (surprise, prise de court).
+  const groundTimedOut = ships.filter(
+    (s) =>
+      !s.is_npc &&
+      s.encounter_pending &&
+      s.encounter_kind === "ground" &&
+      s.encounter_at &&
+      now - new Date(s.encounter_at).getTime() >= GROUND_ENCOUNTER_TIMEOUT_MS,
+  );
+  for (const ship of groundTimedOut) {
+    const frozenPos = { x: ship.encounter_x ?? ship.x, y: ship.encounter_y ?? ship.y };
+    const penalizedChance = Math.max(5, (ship.encounter_win_chance ?? 50) - GROUND_ENCOUNTER_TIMEOUT_PENALTY);
+    const won = rollCombatWin(penalizedChance);
+    const npcId = ship.encounter_npc_ship_id;
+
+    if (npcId) {
+      await db.sql`
+        update ships
+        set encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
+            encounter_kind = null, updated_at = now()
+        where id = ${npcId}::uuid
+      `;
+    }
+
+    if (won) {
+      await db.sql`
+        update ships
+        set encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
+            encounter_win_chance = null, encounter_enemy_faction = null, encounter_npc_ship_id = null,
+            encounter_kind = null, updated_at = now()
+        where id = ${ship.id}::uuid
+      `;
+      await db.sql`update fleets set kills = kills + 1, updated_at = now() where id = ${ship.fleet_id}::uuid`;
+      if (npcId) {
+        const [npc] = await db.sql<{ fleet_id: string }>`select fleet_id from ships where id = ${npcId}::uuid`;
+        await db.sql`delete from ships where id = ${npcId}::uuid`;
+        if (npc) {
+          const respawnAt = new Date(now + NPC_RESPAWN_SECONDS * 1000).toISOString();
+          await db.sql`
+            update fleets set losses = losses + 1, respawn_at = ${respawnAt}, updated_at = now()
+            where id = ${npc.fleet_id}::uuid
+          `;
+        }
+      }
+    } else {
+      const originPlanet = nearestPlanet(frozenPos.x, frozenPos.y);
+      const retreatPath = shortestPath(originPlanet.name, "Coruscant");
+      if (retreatPath) {
+        const firstHop = retreatPath[0];
+        const startsAtFirstHop = firstHop.x === frozenPos.x && firstHop.y === frozenPos.y;
+        const waypoints: Waypoint[] = [
+          frozenPos,
+          ...(startsAtFirstHop ? retreatPath.slice(1) : retreatPath).map((p) => ({ x: p.x, y: p.y })),
+        ];
+        const { departedAt, arrivalAt } = planTravelAlongPath(waypoints);
+        const dest = waypoints[waypoints.length - 1];
+        await db.sql`
+          update ships
+          set x = ${frozenPos.x}, y = ${frozenPos.y},
+              dest_x = ${dest.x}, dest_y = ${dest.y}, dest_planet = 'Coruscant',
+              path = ${JSON.stringify(waypoints)}::jsonb,
+              departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
+              damaged = true,
+              encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
+              encounter_win_chance = null, encounter_enemy_faction = null, encounter_npc_ship_id = null,
+              encounter_kind = null, updated_at = now()
+          where id = ${ship.id}::uuid
+        `;
+      }
+      await db.sql`update fleets set losses = losses + 1, updated_at = now() where id = ${ship.fleet_id}::uuid`;
+    }
   }
 
   // influence République cosmétique par planète attaquée (voir

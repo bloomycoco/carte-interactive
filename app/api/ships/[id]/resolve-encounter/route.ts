@@ -10,12 +10,18 @@ import {
 } from "@/lib/fleets";
 import { nearestPlanet, shortestPath } from "@/lib/routes";
 
-// Résout une rencontre en cours : combattre (chance de victoire, calculée
-// au moment de la rencontre), négocier le passage (très souvent réussi,
-// sinon un combat s'engage quand même), ou fuir (toujours réussi, mais
-// annule le trajet et renvoie le vaisseau d'où il venait). Une défaite
-// au combat (choisi ou après une négociation ratée) endommage le
-// vaisseau et le force à rallier Coruscant ; fuir n'inflige aucun dégât.
+// Résout une rencontre en cours. Deux sortes :
+// - "transit" (croisement en plein vol) : combattre, négocier le
+//   passage (très souvent réussi, sinon un combat s'engage quand même —
+//   sauf contre la CSI, qui ne négocie jamais), ou fuir (toujours
+//   réussi, annule le trajet et renvoie le vaisseau d'où il venait) ;
+// - "ground" (les deux flottes posées sur la même planète, forcément
+//   contre la CSI) : combattre, tenter de passer inaperçu (même
+//   mécanique que négocier, mais ça reste sur place en cas de succès),
+//   ou fuir (toujours réussi, replie vers Coruscant sans dégât).
+// Une défaite au combat (choisi ou après un échec de négociation/
+// discrétion) endommage le vaisseau et le force à rallier Coruscant ;
+// fuir n'inflige jamais de dégât.
 export async function POST(
   request: Request,
   ctx: RouteContext<"/api/ships/[id]/resolve-encounter">,
@@ -26,7 +32,7 @@ export async function POST(
   const choice = body?.choice;
 
   if (!code) return NextResponse.json({ error: "code requis" }, { status: 400 });
-  if (choice !== "fight" && choice !== "negotiate" && choice !== "flee") {
+  if (choice !== "fight" && choice !== "negotiate" && choice !== "flee" && choice !== "sneak") {
     return NextResponse.json({ error: "choix invalide" }, { status: 400 });
   }
 
@@ -46,17 +52,33 @@ export async function POST(
     encounter_y: number | null;
     encounter_npc_ship_id: string | null;
     encounter_enemy_faction: string | null;
+    encounter_kind: "transit" | "ground" | null;
   }>`
     select id, fleet_id, name, code, path, departed_at, arrival_at, encounter_pending, encounter_at,
-           encounter_win_chance, encounter_x, encounter_y, encounter_npc_ship_id, encounter_enemy_faction
+           encounter_win_chance, encounter_x, encounter_y, encounter_npc_ship_id, encounter_enemy_faction,
+           encounter_kind
     from ships
     where id = ${id}::uuid
   `;
   const ship = rows[0];
   if (!ship) return NextResponse.json({ error: "vaisseau introuvable" }, { status: 404 });
   if (ship.code !== code) return NextResponse.json({ error: "code incorrect" }, { status: 403 });
-  if (!ship.encounter_pending || !ship.encounter_at || !ship.path || !ship.departed_at || !ship.arrival_at) {
+  if (!ship.encounter_pending || !ship.encounter_at) {
     return NextResponse.json({ error: "aucune rencontre en cours" }, { status: 400 });
+  }
+  const isGround = ship.encounter_kind === "ground";
+  // en transit, la position figée se retrouve via le trajet en cours si
+  // besoin (voir plus bas) — au sol, un vaisseau fraîchement à quai ou
+  // téléporté peut très bien ne pas (ou plus) avoir de trajet du tout,
+  // ce n'est pas nécessaire : encounter_x/y suffit toujours.
+  if (!isGround && (!ship.path || !ship.departed_at || !ship.arrival_at)) {
+    return NextResponse.json({ error: "aucune rencontre en cours" }, { status: 400 });
+  }
+  if (isGround && choice === "negotiate") {
+    return NextResponse.json({ error: "impossible de négocier au sol, tentez de passer inaperçu" }, { status: 400 });
+  }
+  if (!isGround && choice === "sneak") {
+    return NextResponse.json({ error: "cette option n'est disponible qu'au sol" }, { status: 400 });
   }
   // la CSI ne négocie jamais : guerre totale contre la République
   if (choice === "negotiate" && ship.encounter_enemy_faction === "csi") {
@@ -71,7 +93,7 @@ export async function POST(
   const frozenPos =
     ship.encounter_x != null && ship.encounter_y != null
       ? { x: ship.encounter_x, y: ship.encounter_y }
-      : positionAt(ship.path, new Date(ship.departed_at), new Date(ship.arrival_at), encounterAt);
+      : positionAt(ship.path!, new Date(ship.departed_at!), new Date(ship.arrival_at!), encounterAt);
 
   // le vaisseau NPC croisé redevient libre de reprendre sa route — sauf
   // en cas de victoire au combat, où il est détruit (voir destroyNpc)
@@ -80,7 +102,7 @@ export async function POST(
     await db.sql`
       update ships
       set encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
-          updated_at = now()
+          encounter_kind = null, updated_at = now()
       where id = ${ship!.encounter_npc_ship_id}::uuid
     `;
   }
@@ -103,9 +125,11 @@ export async function POST(
     }
   }
 
-  async function resume(outcome: "won" | "negotiated") {
+  async function resume(outcome: "won" | "negotiated" | "sneaked") {
     // décale tout le calendrier du temps passé à décider : le trajet
-    // reprend exactement là où il s'était figé, sans rien perdre.
+    // reprend exactement là où il s'était figé, sans rien perdre (un
+    // vaisseau à quai en rencontre au sol n'a pas de trajet à décaler :
+    // dest_x reste nul, ces champs sont alors sans effet).
     const pauseMs = Date.now() - encounterAt.getTime();
     const newDeparted = new Date(new Date(ship!.departed_at!).getTime() + pauseMs);
     const newArrival = new Date(new Date(ship!.arrival_at!).getTime() + pauseMs);
@@ -115,7 +139,7 @@ export async function POST(
       set departed_at = ${newDeparted.toISOString()}, arrival_at = ${newArrival.toISOString()},
           encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
           encounter_win_chance = null, encounter_enemy_faction = null, encounter_npc_ship_id = null,
-          updated_at = now()
+          encounter_kind = null, updated_at = now()
       where id = ${id}::uuid
       returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,
                 damaged, encounter_pending, encounter_at
@@ -152,7 +176,7 @@ export async function POST(
           damaged = true,
           encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
           encounter_win_chance = null, encounter_enemy_faction = null, encounter_npc_ship_id = null,
-          updated_at = now()
+          encounter_kind = null, updated_at = now()
       where id = ${id}::uuid
       returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,
                 damaged, encounter_pending, encounter_at
@@ -163,9 +187,42 @@ export async function POST(
 
   if (choice === "flee") {
     await releaseNpc();
-    // fuir réussit toujours, sans dégât : le vaisseau rebrousse chemin
-    // vers la planète d'où il venait pour ce trajet
-    const homePlanet = nearestPlanet(ship.path[0].x, ship.path[0].y);
+    if (isGround) {
+      // au sol : fuir quitte précipitamment la planète vers Coruscant,
+      // sans dégât (contrairement à une défaite au combat)
+      const originPlanet = nearestPlanet(frozenPos.x, frozenPos.y);
+      const retreatPath = shortestPath(originPlanet.name, "Coruscant");
+      if (!retreatPath) {
+        return NextResponse.json({ error: "aucune route de repli connue" }, { status: 500 });
+      }
+      const firstHop = retreatPath[0];
+      const startsAtFirstHop = firstHop.x === frozenPos.x && firstHop.y === frozenPos.y;
+      const waypoints: Waypoint[] = [
+        frozenPos,
+        ...(startsAtFirstHop ? retreatPath.slice(1) : retreatPath).map((p) => ({ x: p.x, y: p.y })),
+      ];
+      const { departedAt, arrivalAt } = planTravelAlongPath(waypoints);
+      const dest = waypoints[waypoints.length - 1];
+
+      const updated = await db.sql`
+        update ships
+        set x = ${frozenPos.x}, y = ${frozenPos.y},
+            dest_x = ${dest.x}, dest_y = ${dest.y}, dest_planet = 'Coruscant',
+            path = ${JSON.stringify(waypoints)}::jsonb,
+            departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
+            encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
+            encounter_win_chance = null, encounter_enemy_faction = null, encounter_npc_ship_id = null,
+            encounter_kind = null, updated_at = now()
+        where id = ${id}::uuid
+        returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,
+                  damaged, encounter_pending, encounter_at
+      `;
+      return NextResponse.json({ ship: updated[0], outcome: "fled" });
+    }
+
+    // en transit : fuir réussit toujours, sans dégât : le vaisseau
+    // rebrousse chemin vers la planète d'où il venait pour ce trajet
+    const homePlanet = nearestPlanet(ship.path![0].x, ship.path![0].y);
     const retreatPath = shortestPath(
       nearestPlanet(frozenPos.x, frozenPos.y).name,
       homePlanet.name,
@@ -190,7 +247,7 @@ export async function POST(
           departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
           encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
           encounter_win_chance = null, encounter_enemy_faction = null, encounter_npc_ship_id = null,
-          updated_at = now()
+          encounter_kind = null, updated_at = now()
       where id = ${id}::uuid
       returning id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,
                 damaged, encounter_pending, encounter_at
@@ -204,6 +261,21 @@ export async function POST(
       return resume("negotiated");
     }
     // négociation ratée : combat, résolu comme "combattre"
+    if (rollCombatWin(ship.encounter_win_chance ?? 50)) {
+      await destroyNpc();
+      return resume("won");
+    }
+    await releaseNpc();
+    return loseCombat();
+  }
+
+  if (choice === "sneak") {
+    if (rollNegotiationSuccess()) {
+      // passe inaperçu : reste sur place, rien ne se passe
+      await releaseNpc();
+      return resume("sneaked");
+    }
+    // repéré : combat, résolu comme "combattre"
     if (rollCombatWin(ship.encounter_win_chance ?? 50)) {
       await destroyNpc();
       return resume("won");

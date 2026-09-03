@@ -34,6 +34,10 @@ export type ShipTravelState = {
   // clan de la flotte NPC croisée, pour l'affichage ("vous croisez une
   // flotte du Cartel !")
   encounter_enemy_faction?: Faction | null;
+  // "transit" : croisement en plein vol (Combattre/Négocier/Fuir).
+  // "ground" : les deux flottes posées sur la même planète
+  // (Combattre/Tenter de passer inaperçu/Fuir).
+  encounter_kind?: "transit" | "ground" | null;
   // action en cours à la surface d'une planète (saisie par le Cartel) :
   // le vaisseau est immobilisé entre action_started_at et action_ends_at
   // (une saisie est programmée dès le départ mais ne commence qu'à
@@ -127,7 +131,10 @@ function pathLength(points: Waypoint[]) {
 // chaque segment.
 export function currentPosition(s: ShipTravelState, now = Date.now()) {
   if (s.dest_x == null || s.dest_y == null || !s.departed_at || !s.arrival_at) {
-    return { x: s.x, y: s.y, traveling: false as const, stuck: false as const };
+    // une rencontre au sol peut figer un vaisseau À QUAI (pas seulement
+    // en plein vol) — toujours signaler "stuck" pour l'affichage
+    const stuck = !!(s.encounter_pending && s.encounter_at && now >= new Date(s.encounter_at).getTime());
+    return { x: s.x, y: s.y, traveling: false as const, stuck };
   }
   const start = new Date(s.departed_at).getTime();
   const end = new Date(s.arrival_at).getTime();
