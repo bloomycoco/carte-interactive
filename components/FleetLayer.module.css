@@ -5,6 +5,16 @@
   z-index: 5;
 }
 
+.fleet.clickable {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.fleet.clickable .icon {
+  width: 13px;
+  height: 13px;
+}
+
 .icon {
   width: 9px;
   height: 9px;

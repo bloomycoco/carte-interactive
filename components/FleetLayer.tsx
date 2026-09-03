@@ -9,10 +9,12 @@ export default function FleetLayer({
   ships,
   unlockedShips,
   now,
+  onSelectShip,
 }: {
   ships: PublicShip[];
   unlockedShips: UnlockedShip[];
   now: number;
+  onSelectShip?: (id: string) => void;
 }) {
   return (
     <>
@@ -38,6 +40,7 @@ export default function FleetLayer({
               pos.stuck ? styles.stuck : "",
               busy ? styles.busy : "",
               s.damaged ? styles.damaged : "",
+              !s.is_npc ? styles.clickable : "",
             ].join(" ")}
             style={{
               left: pos.x,
@@ -45,6 +48,7 @@ export default function FleetLayer({
               ["--fleet-color" as string]: meta.color,
             }}
             title={status}
+            onClick={s.is_npc ? undefined : () => onSelectShip?.(s.id)}
           >
             <div className={styles.icon} />
           </div>

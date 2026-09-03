@@ -60,6 +60,7 @@ export default function GalaxyMap() {
   const searchWrapRef = useRef<HTMLDivElement>(null);
 
   const [selected, setSelected] = useState<Planet | null>(null);
+  const [selectedShipId, setSelectedShipId] = useState<string | null>(null);
   const [hiddenFactions, setHiddenFactions] = useState<Set<Faction>>(new Set());
   const [query, setQuery] = useState("");
   const [dragging, setDragging] = useState(false);
@@ -383,7 +384,20 @@ export default function GalaxyMap() {
         ? { originPlanet: live.quest_origin_planet, targetPlanet: live.quest_target_planet, phase: live.quest_phase }
         : null;
     const action = availablePlanetAction(planet.name, planet.faction, unlocked.faction, quest);
-    return action ? { planet, action } : null;
+    if (!action) return null;
+    // attaquer exige TOUTE la flotte rassemblée sur place, pas juste ce
+    // vaisseau — masque le bouton tant que ce n'est pas le cas
+    if (action === "attack") {
+      const fleetmates = ships.filter((s) => s.fleet_id === live.fleet_id);
+      const allGathered = fleetmates.every((s) => {
+        if (s.damaged || s.encounter_pending) return false;
+        const sPos = currentPosition(s, now);
+        if (sPos.traveling) return false;
+        return nearestPlanet(sPos.x, sPos.y).name === planet.name;
+      });
+      if (!allGathered) return null;
+    }
+    return { planet, action };
   }
 
   async function triggerAction(shipId: string, type: PlanetAction) {
@@ -606,6 +620,12 @@ export default function GalaxyMap() {
     });
   }
 
+  // fiche vaisseau affichée dans le panneau au clic (jamais pour un NPC,
+  // filtré déjà côté FleetLayer — mais on revérifie ici par sécurité)
+  const selectedShip = selectedShipId
+    ? (ships.find((s) => s.id === selectedShipId && !s.is_npc) ?? null)
+    : null;
+
   // vaisseaux contrôlés, à l'arrêt sur la planète actuellement affichée
   // dans le panneau, avec une action disponible ici (aide humanitaire /
   // attaquer la planète)
@@ -697,7 +717,10 @@ export default function GalaxyMap() {
                   ["--dot-glow" as string]: meta.color,
                   ["--pulse-delay" as string]: `${idx * 0.17}s`,
                 }}
-                onClick={() => setSelected(p)}
+                onClick={() => {
+                  setSelected(p);
+                  setSelectedShipId(null);
+                }}
               >
                 <div className={styles.dot} />
                 <div className={styles.label}>{p.name}</div>
@@ -705,7 +728,15 @@ export default function GalaxyMap() {
             );
           })}
 
-          <FleetLayer ships={ships} unlockedShips={unlockedShips} now={now} />
+          <FleetLayer
+            ships={ships}
+            unlockedShips={unlockedShips}
+            now={now}
+            onSelectShip={(shipId) => {
+              setSelectedShipId(shipId);
+              setSelected(null);
+            }}
+          />
         </div>
       </div>
 
@@ -944,11 +975,46 @@ export default function GalaxyMap() {
         ))}
       </div>
 
-      <div className={`${styles.panel} ${selected ? styles.open : ""}`}>
-        <button className={styles.panelClose} onClick={() => setSelected(null)}>
+      <div className={`${styles.panel} ${selected || selectedShip ? styles.open : ""}`}>
+        <button
+          className={styles.panelClose}
+          onClick={() => {
+            setSelected(null);
+            setSelectedShipId(null);
+          }}
+        >
           ✕
         </button>
-        {selected ? (
+        {selectedShip ? (
+          <div>
+            <div
+              className={styles.panelFaction}
+              style={{ ["--f" as string]: FACTION_META[selectedShip.faction].color }}
+            >
+              <span className={styles.swatch} />
+              {FACTION_META[selectedShip.faction].label}
+            </div>
+            <h2>{selectedShip.name}</h2>
+            <div className={styles.system}>{selectedShip.category ?? "Type inconnu"}</div>
+            <div className={styles.coords}>
+              <div>
+                DESTINATION{" "}
+                <b>
+                  {selectedShip.dest_planet
+                    ? selectedShip.dest_planet
+                    : currentPosition(selectedShip, now).traveling
+                      ? "—"
+                      : "à quai"}
+                </b>
+              </div>
+              {selectedShip.damaged && (
+                <div>
+                  ÉTAT <b>endommagé</b>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : selected ? (
           <div>
             <div
               className={styles.panelFaction}
@@ -1034,7 +1100,7 @@ export default function GalaxyMap() {
           </div>
         ) : (
           <div className={styles.panelEmpty}>
-            Sélectionnez un système
+            Sélectionnez un système ou un vaisseau
             <br />
             pour afficher son dossier.
           </div>

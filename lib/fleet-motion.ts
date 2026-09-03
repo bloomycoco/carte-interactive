@@ -63,13 +63,17 @@ export function isActionActive(s: ShipTravelState, now = Date.now()) {
   return start <= now && now < end;
 }
 
-// Un vaisseau tel que renseigné sur la carte publique — pas de code ici,
-// ni de flotte (le rattachement n'a d'intérêt que côté admin/déverrouillage).
+// Un vaisseau tel que renseigné sur la carte publique — pas de code ici
+// (le contrôle n'a d'intérêt que côté déverrouillage). fleet_id sert à
+// savoir si toute une flotte est rassemblée quelque part (ex: attaquer
+// une planète), pas à afficher quoi que ce soit de sensible.
 export type PublicShip = ShipTravelState & {
   id: string;
+  fleet_id: string;
   name: string;
   category: string | null;
   faction: Faction;
+  is_npc: boolean;
   dest_planet: string | null;
   damaged: boolean;
 };

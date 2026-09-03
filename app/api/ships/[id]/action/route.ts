@@ -18,9 +18,10 @@ import { fleetStrength } from "@/lib/ship-classes";
 //   départ vers une planète tirée au sort (toujours lointaine),
 //   récupération des vivres sur place, puis retour les livrer sur le
 //   monde d'origine ;
-// - attaquer la planète (monde d'un clan ennemi) : résolu immédiatement
-//   avec 1 vaisseau — une victoire renforce la flotte (kills, comme un
-//   combat gagné), un échec renforce TOUTES les flottes NPC de ce clan.
+// - attaquer la planète (monde d'un clan ennemi) : résolu immédiatement,
+//   mais seulement si TOUTE la flotte (chaque vaisseau) est rassemblée
+//   sur place — une victoire renforce la flotte (kills, comme un combat
+//   gagné), un échec renforce TOUTES les flottes NPC de ce clan.
 // Accessible avec le code DU VAISSEAU.
 export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/action">) {
   const { id } = await ctx.params;
@@ -171,12 +172,37 @@ export async function POST(request: Request, ctx: RouteContext<"/api/ships/[id]/
     return NextResponse.json({ ok: true, type, planet: planet.name, ship: updated[0] });
   }
 
-  // attaquer la planète : résolu immédiatement avec ce seul vaisseau —
-  // les chances de victoire dépendent de la force de sa flotte, comme
-  // pour une rencontre normale.
-  const fleetShips = await db.sql<{ category: string | null }>`
-    select category from ships where fleet_id = ${ship.fleet_id}::uuid
+  // attaquer la planète : il faut TOUTE la flotte rassemblée sur place
+  // (chaque vaisseau, idle, sur cette planète) — pas juste celui-ci.
+  const fleetShips = await db.sql<{
+    id: string;
+    category: string | null;
+    x: number;
+    y: number;
+    dest_x: number | null;
+    dest_y: number | null;
+    departed_at: string | null;
+    arrival_at: string | null;
+    path: Waypoint[] | null;
+    damaged: boolean;
+    encounter_pending: boolean;
+  }>`
+    select id, category, x, y, dest_x, dest_y, departed_at, arrival_at, path, damaged, encounter_pending
+    from ships where fleet_id = ${ship.fleet_id}::uuid
   `;
+  const allGathered = fleetShips.every((s) => {
+    if (s.damaged || s.encounter_pending) return false;
+    const sPos = currentPosition(s);
+    if (sPos.traveling) return false;
+    return nearestPlanet(sPos.x, sPos.y).name === planet.name;
+  });
+  if (!allGathered) {
+    return NextResponse.json(
+      { error: `toute la flotte doit être rassemblée sur ${planet.name} pour attaquer` },
+      { status: 400 },
+    );
+  }
+
   const [fleetRow] = await db.sql<{ kills: number; losses: number }>`
     select kills, losses from fleets where id = ${ship.fleet_id}::uuid
   `;
