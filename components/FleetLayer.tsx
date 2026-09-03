@@ -48,6 +48,7 @@ export default function FleetLayer({
               ["--fleet-color" as string]: meta.color,
             }}
             title={status}
+            data-ship-marker="true"
             onClick={() => onSelectShip?.(s.id)}
           >
             <div className={styles.icon} />

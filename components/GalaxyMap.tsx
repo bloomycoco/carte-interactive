@@ -642,7 +642,12 @@ export default function GalaxyMap() {
 
     function onPointerDown(e: PointerEvent) {
       const target = e.target as HTMLElement;
-      if (target.closest(`.${styles.searchWrap}`) || target.closest(`.${styles.planet}`)) return;
+      if (
+        target.closest(`.${styles.searchWrap}`) ||
+        target.closest(`.${styles.planet}`) ||
+        target.closest("[data-ship-marker]")
+      )
+        return;
       isDragging = true;
       lastX = e.clientX;
       lastY = e.clientY;
