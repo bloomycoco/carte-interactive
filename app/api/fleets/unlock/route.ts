@@ -1,4 +1,4 @@
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { fleetStrength } from "@/lib/ship-classes";
 
@@ -11,7 +11,13 @@ export async function POST(request: Request) {
   if (!code) return NextResponse.json({ error: "code requis" }, { status: 400 });
 
   const db = getDatabase();
-  const fleets = await db.sql`
+  const fleets = await db.sql<{
+    id: string;
+    name: string;
+    faction: string;
+    kills: number;
+    losses: number;
+  }>`
     select id, name, faction, kills, losses from fleets where code = ${code}
   `;
   const fleet = fleets[0];

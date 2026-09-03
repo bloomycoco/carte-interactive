@@ -1,4 +1,4 @@
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "@/lib/db";
 import { NextResponse } from "next/server";
 
 // Le code de VAISSEAU donne le contrôle direct, sans passer par le code

@@ -1,4 +1,4 @@
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "@/lib/db";
 import { NextResponse } from "next/server";
 
 // Liste publique de tous les vaisseaux, pour les afficher sur la carte.

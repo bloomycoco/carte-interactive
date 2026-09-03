@@ -1,4 +1,4 @@
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { planTravelAlongPath, positionAt, rollCombatWin, type Waypoint } from "@/lib/fleets";
 import { nearestPlanet, shortestPath } from "@/lib/routes";

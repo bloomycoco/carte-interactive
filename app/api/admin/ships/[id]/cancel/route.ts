@@ -1,4 +1,4 @@
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/session";
 import { currentPosition, type Waypoint } from "@/lib/fleets";

@@ -1,4 +1,4 @@
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/session";
 import { generateCode, type Faction } from "@/lib/fleets";
@@ -13,7 +13,16 @@ export async function GET() {
   if (!role) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
   const db = getDatabase();
-  const fleets = await db.sql`
+  const fleets = await db.sql<{
+    id: string;
+    name: string;
+    faction: Faction;
+    code: string;
+    kills: number;
+    losses: number;
+    created_at: string;
+    updated_at: string;
+  }>`
     select id, name, faction, code, kills, losses, created_at, updated_at
     from fleets order by created_at asc
   `;
