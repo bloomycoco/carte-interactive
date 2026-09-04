@@ -38,8 +38,10 @@ export type ShipTravelState = {
   // "ground" : les deux flottes posées sur la même planète
   // (Combattre/Tenter de passer inaperçu/Fuir). "chase" : le joueur a
   // délibérément pris le NPC en chasse (Combattre/Négocier/Fuir, comme
-  // "transit", mais fuir replie vers Kuat comme "ground").
-  encounter_kind?: "transit" | "ground" | "chase" | null;
+  // "transit", mais fuir replie vers Kuat comme "ground"). "boss" :
+  // combat contre le boss galactique — jamais de négociation, chances
+  // toujours fixées à BOSS_WIN_CHANCE.
+  encounter_kind?: "transit" | "ground" | "chase" | "boss" | null;
   // nombre de vaisseaux de chaque côté au moment où la rencontre a été
   // déclenchée — friendly = ceux physiquement rassemblés avec ce
   // vaisseau (voir groupedFleetStrength), enemy = toute la patrouille
@@ -52,6 +54,10 @@ export type ShipTravelState = {
   // réoriente le trajet vers la cible et déclenche la rencontre une
   // fois assez proche.
   chase_target_id?: string | null;
+  // poursuite du BOSS en cours (voir POST /api/ships/[id]/boss-chase) —
+  // même principe que chase_target_id, mais référence boss.id au lieu
+  // d'un vaisseau NPC.
+  chasing_boss_id?: string | null;
   // action en cours à la surface d'une planète (saisie par le Cartel) :
   // le vaisseau est immobilisé entre action_started_at et action_ends_at
   // (une saisie est programmée dès le départ mais ne commence qu'à
@@ -95,6 +101,18 @@ export type PublicShip = ShipTravelState & {
   dest_planet: string | null;
   damaged: boolean;
   chase_target_id: string | null;
+  chasing_boss_id: string | null;
+};
+
+// Le boss galactique tel que renseigné sur la carte publique — même
+// forme de déplacement qu'un vaisseau (x/y/dest/path/departed_at/
+// arrival_at), donc currentPosition() s'applique tel quel.
+export type PublicBoss = ShipTravelState & {
+  id: string;
+  name: string;
+  hits: number;
+  hitsRequired: number;
+  winChance: number;
 };
 
 // Une flotte "déverrouillée" côté navigateur avec son code : donne accès

@@ -6,6 +6,8 @@ import {
   groupedFleetStrength,
   planShipOrder,
   planTravelAlongPath,
+  pickBossPathTo,
+  pickBossRoute,
   pickNpcFleetFlavor,
   pickNpcFleetShipCount,
   pickNpcRoute,
@@ -36,6 +38,24 @@ import { fleetStrength } from "@/lib/ship-classes";
 const GROUND_ENCOUNTER_TIMEOUT_MS = 30_000;
 const GROUND_ENCOUNTER_TIMEOUT_PENALTY = 20;
 
+type BossRow = {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  dest_x: number | null;
+  dest_y: number | null;
+  dest_planet: string | null;
+  path: Waypoint[] | null;
+  departed_at: string | null;
+  arrival_at: string | null;
+  hits: number;
+  hits_required: number;
+  win_chance: number;
+  alive: boolean;
+  target_planet: string | null;
+};
+
 type ShipRow = {
   id: string;
   fleet_id: string;
@@ -57,12 +77,13 @@ type ShipRow = {
   encounter_win_chance: number | null;
   encounter_enemy_faction: Faction | null;
   encounter_npc_ship_id: string | null;
-  encounter_kind: "transit" | "ground" | "chase" | null;
+  encounter_kind: "transit" | "ground" | "chase" | "boss" | null;
   encounter_x: number | null;
   encounter_y: number | null;
   encounter_friendly_count: number | null;
   encounter_enemy_count: number | null;
   chase_target_id: string | null;
+  chasing_boss_id: string | null;
   action_type: "seized" | null;
   action_started_at: string | null;
   action_ends_at: string | null;
@@ -88,7 +109,12 @@ type ShipRow = {
 //    — et toute sa patrouille — ou se réoriente si elle a changé de cap ;
 //    3) un vaisseau République en transit qui passe près d'une
 //    patrouille NPC en transit déclenche une vraie rencontre contre
-//    TOUTE la patrouille.
+//    TOUTE la patrouille ; 5) le clan spolié (CSI ou Mandalore) tente de
+//    reprendre une planète perdue (> 10% d'influence République) ; 6) le
+//    boss galactique (s'il est vivant) se balade partout sauf Coruscant,
+//    ou fonce droit sur la planète que le Owner lui a ordonné de
+//    capturer (page de contrôle) — une fois arrivé, elle devient
+//    "Hostile" (verte) sur la carte.
 // La force réellement engagée côté République ne compte que les
 // vaisseaux PHYSIQUEMENT rassemblés avec celui qui engage le combat
 // (voir groupedFleetStrength) — se regrouper avant une rencontre
@@ -105,7 +131,7 @@ export async function GET() {
            s.departed_at, s.arrival_at, s.path, s.damaged,
            s.encounter_pending, s.encounter_at, s.encounter_win_chance, s.encounter_enemy_faction,
            s.encounter_npc_ship_id, s.encounter_kind, s.encounter_x, s.encounter_y,
-           s.encounter_friendly_count, s.encounter_enemy_count, s.chase_target_id,
+           s.encounter_friendly_count, s.encounter_enemy_count, s.chase_target_id, s.chasing_boss_id,
            s.action_type, s.action_started_at, s.action_ends_at,
            s.quest_type, s.quest_origin_planet, s.quest_target_planet, s.quest_phase
     from ships s
@@ -162,6 +188,7 @@ export async function GET() {
         encounter_friendly_count: null,
         encounter_enemy_count: null,
         chase_target_id: null,
+        chasing_boss_id: null,
         action_type: null,
         action_started_at: null,
         action_ends_at: null,
@@ -582,13 +609,14 @@ export async function GET() {
     }
   }
 
-  // 5) le CSI tente de reprendre les planètes qu'il a perdues (> 10%
-  // d'influence République — la CSI ne tolère qu'un pied-à-terre
-  // minime) : une attaque est d'abord annoncée (csi_attack_at, clignote
-  // rouge sur la carte) puis résolue après ce délai — une victoire CSI
-  // reprend d'un coup CSI_COUNTERATTACK_INFLUENCE_GAIN points, plafonnée
-  // à 10% (elle continue de retenter tant que ce n'est pas redescendu à
-  // 10% ou moins), bien plus qu'une victoire République (+7 seulement).
+  // 5) le clan concerné (CSI ou Mandalore) tente de reprendre les
+  // planètes qu'il a perdues (> 10% d'influence République — aucun clan
+  // ne tolère plus qu'un pied-à-terre minime) : une attaque est d'abord
+  // annoncée (csi_attack_at, clignote rouge sur la carte) puis résolue
+  // après ce délai — une victoire reprend d'un coup CSI_COUNTERATTACK_
+  // INFLUENCE_GAIN points, plafonnée à 10% (le clan continue de
+  // retenter tant que ce n'est pas redescendu à 10% ou moins), bien plus
+  // qu'une victoire République (+7 seulement).
   const contestedPlanets = await db.sql<{
     planet_name: string;
     republic_pct: number;
@@ -598,7 +626,8 @@ export async function GET() {
   `;
   for (const row of contestedPlanets) {
     const planet = PLANETS.find((p) => p.name === row.planet_name);
-    if (!planet || planet.faction !== "csi") continue;
+    if (!planet || (planet.faction !== "csi" && planet.faction !== "mandalore")) continue;
+    const faction = planet.faction;
 
     if (!row.csi_attack_at) {
       if (!rollCsiCounterattackStart()) continue;
@@ -612,17 +641,17 @@ export async function GET() {
     }
     if (new Date(row.csi_attack_at).getTime() > now) continue; // encore en approche
 
-    const csiFleetIds = [...new Set(ships.filter((s) => s.is_npc && s.faction === "csi").map((s) => s.fleet_id))];
-    if (csiFleetIds.length === 0) {
+    const attackerFleetIds = [...new Set(ships.filter((s) => s.is_npc && s.faction === faction).map((s) => s.fleet_id))];
+    if (attackerFleetIds.length === 0) {
       await db.sql`update planet_influence set csi_attack_at = null, updated_at = now() where planet_name = ${row.planet_name}`;
       continue;
     }
-    const attackerFleetId = csiFleetIds[Math.floor(Math.random() * csiFleetIds.length)];
+    const attackerFleetId = attackerFleetIds[Math.floor(Math.random() * attackerFleetIds.length)];
     const attackerShips = ships.filter((s) => s.fleet_id === attackerFleetId);
     const [fleetRow] = await db.sql<{ kills: number; losses: number }>`
       select kills, losses from fleets where id = ${attackerFleetId}::uuid
     `;
-    const strength = fleetStrength(attackerShips, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0) * difficulty.csi;
+    const strength = fleetStrength(attackerShips, fleetRow?.kills ?? 0, fleetRow?.losses ?? 0) * difficulty[faction];
     const won = rollCombatWin(rollEncounterOdds(strength));
 
     if (won) {
@@ -637,6 +666,122 @@ export async function GET() {
     }
   }
 
+  // 6) le boss galactique (s'il est vivant) : se balade PARTOUT sauf
+  // Coruscant, comme une flotte NPC mais sans territoire — et les
+  // vaisseaux qui l'ont pris en chasse (chasing_boss_id) le rattrapent
+  // ou se réorientent, exactement comme une chasse normale, sauf que ses
+  // chances de combat restent toujours fixées à boss.win_chance, quelle
+  // que soit la force engagée (voir resolve-encounter).
+  const [boss] = await db.sql<BossRow>`
+    select id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,
+           hits, hits_required, win_chance, alive, target_planet
+    from boss where alive = true order by spawned_at desc limit 1
+  `;
+
+  if (boss) {
+    const bossIdlePos = currentPosition(boss, now);
+    if (!bossIdlePos.traveling) {
+      const originPlanet = nearestPlanet(bossIdlePos.x, bossIdlePos.y);
+
+      // le Owner a ordonné au boss de capturer une planète précise
+      // (page de contrôle) : soit il vient d'y arriver (capture), soit
+      // il s'y dirige directement au lieu d'un trajet aléatoire.
+      if (boss.target_planet && originPlanet.name === boss.target_planet) {
+        await db.sql`
+          insert into boss_hostile_planets (planet_name) values (${boss.target_planet})
+          on conflict (planet_name) do nothing
+        `;
+        await db.sql`update boss set target_planet = null, updated_at = now() where id = ${boss.id}::uuid`;
+        boss.target_planet = null;
+      }
+
+      const route = boss.target_planet
+        ? pickBossPathTo(originPlanet.name, boss.target_planet)
+        : pickBossRoute(originPlanet.name);
+      if (route) {
+        const { destination: dest, path: routePath } = route;
+        const firstHop = routePath[0];
+        const startsAtFirstHop = firstHop.x === bossIdlePos.x && firstHop.y === bossIdlePos.y;
+        const waypoints: Waypoint[] = [
+          { x: bossIdlePos.x, y: bossIdlePos.y },
+          ...(startsAtFirstHop ? routePath.slice(1) : routePath).map((p) => ({ x: p.x, y: p.y })),
+        ];
+        const { departedAt, arrivalAt } = planTravelAlongPath(waypoints);
+        await db.sql`
+          update boss
+          set x = ${bossIdlePos.x}, y = ${bossIdlePos.y}, dest_x = ${dest.x}, dest_y = ${dest.y},
+              dest_planet = ${dest.name}, path = ${JSON.stringify(waypoints)}::jsonb,
+              departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
+              updated_at = now()
+          where id = ${boss.id}::uuid
+        `;
+        boss.x = bossIdlePos.x;
+        boss.y = bossIdlePos.y;
+        boss.dest_x = dest.x;
+        boss.dest_y = dest.y;
+        boss.dest_planet = dest.name;
+        boss.path = waypoints;
+        boss.departed_at = departedAt.toISOString();
+        boss.arrival_at = arrivalAt.toISOString();
+      }
+    }
+
+    const bossChasers = ships.filter(
+      (s) => !s.is_npc && s.chasing_boss_id === boss.id && !s.damaged && !s.encounter_pending,
+    );
+    for (const ship of bossChasers) {
+      const shipPos = currentPosition(ship, now);
+      const livePos = currentPosition(boss, now);
+      const dist = Math.hypot(livePos.x - shipPos.x, livePos.y - shipPos.y);
+
+      if (dist <= CHASE_CATCH_RADIUS) {
+        const encounterAtIso = new Date(now).toISOString();
+        await db.sql`
+          update ships
+          set encounter_pending = true, encounter_at = ${encounterAtIso}, encounter_win_chance = ${boss.win_chance},
+              encounter_x = ${shipPos.x}, encounter_y = ${shipPos.y}, encounter_enemy_faction = null,
+              encounter_npc_ship_id = null, encounter_kind = 'boss', chasing_boss_id = null,
+              encounter_friendly_count = null, encounter_enemy_count = null,
+              updated_at = now()
+          where id = ${ship.id}::uuid
+        `;
+        ship.encounter_pending = true;
+        ship.encounter_at = encounterAtIso;
+        ship.encounter_win_chance = boss.win_chance;
+        ship.encounter_kind = "boss";
+        ship.chasing_boss_id = null;
+        continue;
+      }
+
+      const bossAimPlanet =
+        livePos.traveling && boss.dest_planet ? boss.dest_planet : nearestPlanet(livePos.x, livePos.y).name;
+      if (ship.dest_planet === bossAimPlanet) continue;
+      const destPlanet = PLANETS.find((p) => p.name === bossAimPlanet);
+      if (!destPlanet) continue;
+      const originPlanet = nearestPlanet(shipPos.x, shipPos.y);
+      const plan = planShipOrder(shipPos, originPlanet.name, destPlanet, ship.faction, CHASE_SPEED_MULTIPLIER);
+      if (!plan) continue;
+
+      await db.sql`
+        update ships
+        set x = ${shipPos.x}, y = ${shipPos.y},
+            dest_x = ${plan.destination.x}, dest_y = ${plan.destination.y}, dest_planet = ${plan.destination.name},
+            path = ${JSON.stringify(plan.waypoints)}::jsonb,
+            departed_at = ${plan.departedAt.toISOString()}, arrival_at = ${plan.arrivalAt.toISOString()},
+            updated_at = now()
+        where id = ${ship.id}::uuid
+      `;
+      ship.x = shipPos.x;
+      ship.y = shipPos.y;
+      ship.dest_x = plan.destination.x;
+      ship.dest_y = plan.destination.y;
+      ship.dest_planet = plan.destination.name;
+      ship.path = plan.waypoints;
+      ship.departed_at = plan.departedAt.toISOString();
+      ship.arrival_at = plan.arrivalAt.toISOString();
+    }
+  }
+
   // influence République cosmétique par planète attaquée (voir
   // POST /api/ships/[id]/action) — pour teinter la carte et afficher une
   // jauge au clic sur la planète, et signaler une contre-attaque CSI en
@@ -648,5 +793,29 @@ export async function GET() {
     influenceRows.map((r) => [r.planet_name, { republicPct: r.republic_pct, csiAttackAt: r.csi_attack_at }]),
   );
 
-  return NextResponse.json({ ships, planetInfluence });
+  const publicBoss = boss
+    ? {
+        id: boss.id,
+        name: boss.name,
+        x: boss.x,
+        y: boss.y,
+        dest_x: boss.dest_x,
+        dest_y: boss.dest_y,
+        dest_planet: boss.dest_planet,
+        path: boss.path,
+        departed_at: boss.departed_at,
+        arrival_at: boss.arrival_at,
+        hits: boss.hits,
+        hitsRequired: boss.hits_required,
+        winChance: boss.win_chance,
+        targetPlanet: boss.target_planet,
+      }
+    : null;
+
+  // planètes capturées par le boss (page de contrôle Owner) — verdies
+  // sur la carte ("Hostile"), indépendamment du sort du boss lui-même.
+  const hostileRows = await db.sql<{ planet_name: string }>`select planet_name from boss_hostile_planets`;
+  const hostilePlanets = hostileRows.map((r) => r.planet_name);
+
+  return NextResponse.json({ ships, planetInfluence, boss: publicBoss, hostilePlanets });
 }

@@ -400,3 +400,53 @@ export function pickNpcRoute(
   if (!destination) return null;
   return { destination, path };
 }
+
+// Boss galactique unique (Summa-verminoth, page Owner) : se balade
+// PARTOUT sauf Coruscant, jamais confiné à un territoire — contrairement
+// aux flottes NPC de clan. Ses chances de combat sont toujours fixées
+// (BOSS_WIN_CHANCE), quelle que soit la force qui l'affronte : ce n'est
+// pas un adversaire qu'on écrase en se regroupant, il faut l'affronter
+// BOSS_HITS_REQUIRED fois de suite pour l'abattre.
+export const BOSS_NAME = "Summa-verminoth";
+export const BOSS_WIN_CHANCE = 30;
+export const BOSS_HITS_REQUIRED = 10;
+
+const BOSS_ALLOWED_PLANETS = new Set(PLANETS.filter((p) => p.name !== "Coruscant").map((p) => p.name));
+
+export function pickBossSpawnPlanet(): Planet {
+  const candidates = PLANETS.filter((p) => p.name !== "Coruscant");
+  return candidates[crypto.randomInt(candidates.length)];
+}
+
+export function pickBossRoute(currentPlanetName: string): { destination: Planet; path: Planet[] } | null {
+  const reachable = [...reachableWithin(currentPlanetName, BOSS_ALLOWED_PLANETS)].filter(
+    (name) => name !== currentPlanetName,
+  );
+  if (reachable.length === 0) return null;
+
+  const destName = reachable[crypto.randomInt(reachable.length)];
+  const path = shortestPath(currentPlanetName, destName, BOSS_ALLOWED_PLANETS);
+  if (!path) return null;
+
+  const destination = PLANETS.find((p) => p.name === destName);
+  if (!destination) return null;
+  return { destination, path };
+}
+
+// Trajet imposé par le Owner (boss.target_planet, page de contrôle) :
+// même réseau restreint que pickBossRoute (jamais Coruscant), mais vers
+// une destination précise plutôt que tirée au sort.
+export function pickBossPathTo(currentPlanetName: string, destinationPlanetName: string): { destination: Planet; path: Planet[] } | null {
+  if (!BOSS_ALLOWED_PLANETS.has(destinationPlanetName)) return null;
+  const path = shortestPath(currentPlanetName, destinationPlanetName, BOSS_ALLOWED_PLANETS);
+  if (!path) return null;
+  const destination = PLANETS.find((p) => p.name === destinationPlanetName);
+  if (!destination) return null;
+  return { destination, path };
+}
+
+// Le boss peut-il être envoyé capturer cette planète ? (jamais
+// Coruscant — voir BOSS_ALLOWED_PLANETS)
+export function isValidBossTarget(planetName: string): boolean {
+  return BOSS_ALLOWED_PLANETS.has(planetName);
+}
