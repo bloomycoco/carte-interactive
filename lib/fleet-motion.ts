@@ -113,6 +113,8 @@ export type PublicBoss = ShipTravelState & {
   hits: number;
   hitsRequired: number;
   winChance: number;
+  targetPlanet: string | null;
+  targetFleetId: string | null;
 };
 
 // Une flotte "déverrouillée" côté navigateur avec son code : donne accès

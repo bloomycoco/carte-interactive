@@ -29,7 +29,7 @@ import {
   type Waypoint,
 } from "@/lib/fleets";
 import { nearestPlanet, shortestPath } from "@/lib/routes";
-import { PLANETS } from "@/lib/planets";
+import { PLANETS, type Planet } from "@/lib/planets";
 import { fleetStrength } from "@/lib/ship-classes";
 
 // Une rencontre au sol non tranchée dans ce délai est résolue
@@ -54,6 +54,7 @@ type BossRow = {
   win_chance: number;
   alive: boolean;
   target_planet: string | null;
+  target_fleet_id: string | null;
 };
 
 type ShipRow = {
@@ -674,7 +675,7 @@ export async function GET() {
   // que soit la force engagée (voir resolve-encounter).
   const [boss] = await db.sql<BossRow>`
     select id, name, x, y, dest_x, dest_y, dest_planet, path, departed_at, arrival_at,
-           hits, hits_required, win_chance, alive, target_planet
+           hits, hits_required, win_chance, alive, target_planet, target_fleet_id
     from boss where alive = true order by spawned_at desc limit 1
   `;
 
@@ -683,9 +684,10 @@ export async function GET() {
     if (!bossIdlePos.traveling) {
       const originPlanet = nearestPlanet(bossIdlePos.x, bossIdlePos.y);
 
-      // le Owner a ordonné au boss de capturer une planète précise
-      // (page de contrôle) : soit il vient d'y arriver (capture), soit
-      // il s'y dirige directement au lieu d'un trajet aléatoire.
+      // le détenteur du code secret a ordonné au boss de capturer une
+      // planète précise (page de contrôle) : soit il vient d'y arriver
+      // (capture), soit il s'y dirige directement au lieu d'un trajet
+      // aléatoire.
       if (boss.target_planet && originPlanet.name === boss.target_planet) {
         await db.sql`
           insert into boss_hostile_planets (planet_name) values (${boss.target_planet})
@@ -695,9 +697,35 @@ export async function GET() {
         boss.target_planet = null;
       }
 
+      // ou ordonné de traquer une flotte précise : vise le vaisseau de
+      // cette flotte le plus proche du boss (non endommagé), recalculé
+      // à chaque tick puisque la cible bouge — repli sur un trajet
+      // aléatoire si elle est introuvable (détruite) ou hors de portée
+      // (réfugiée sur Coruscant, où le boss ne va jamais).
+      let targetFleetAim: { destination: Planet; path: Planet[] } | null = null;
+      if (boss.target_fleet_id) {
+        const targets = ships.filter((s) => s.fleet_id === boss.target_fleet_id && !s.damaged);
+        let nearest: ShipRow | null = null;
+        let nearestDist = Infinity;
+        for (const t of targets) {
+          const tPos = currentPosition(t, now);
+          const d = Math.hypot(tPos.x - bossIdlePos.x, tPos.y - bossIdlePos.y);
+          if (d < nearestDist) {
+            nearestDist = d;
+            nearest = t;
+          }
+        }
+        if (nearest) {
+          const tPos = currentPosition(nearest, now);
+          const aimName =
+            tPos.traveling && nearest.dest_planet ? nearest.dest_planet : nearestPlanet(tPos.x, tPos.y).name;
+          targetFleetAim = pickBossPathTo(originPlanet.name, aimName);
+        }
+      }
+
       const route = boss.target_planet
         ? pickBossPathTo(originPlanet.name, boss.target_planet)
-        : pickBossRoute(originPlanet.name);
+        : (targetFleetAim ?? pickBossRoute(originPlanet.name));
       if (route) {
         const { destination: dest, path: routePath } = route;
         const firstHop = routePath[0];
@@ -723,6 +751,60 @@ export async function GET() {
         boss.path = waypoints;
         boss.departed_at = departedAt.toISOString();
         boss.arrival_at = arrivalAt.toISOString();
+      }
+    }
+
+    // s'il traque une flotte précise, tout vaisseau de cette flotte que
+    // le boss rattrape (même à portée que la chasse volontaire) est
+    // endommagé et renvoyé sur Kuat — pas de combat, pas de choix pour
+    // l'équipage, le boss frappe le premier
+    if (boss.target_fleet_id) {
+      const liveBossPos = currentPosition(boss, now);
+      const prey = ships.filter((s) => s.fleet_id === boss.target_fleet_id && !s.damaged);
+      for (const ship of prey) {
+        const shipPos = currentPosition(ship, now);
+        const dist = Math.hypot(liveBossPos.x - shipPos.x, liveBossPos.y - shipPos.y);
+        if (dist > CHASE_CATCH_RADIUS) continue;
+
+        const originPlanet = nearestPlanet(shipPos.x, shipPos.y);
+        const retreatPath = shortestPath(originPlanet.name, "Kuat");
+        if (!retreatPath) continue;
+        const firstHop = retreatPath[0];
+        const startsAtFirstHop = firstHop.x === shipPos.x && firstHop.y === shipPos.y;
+        const waypoints: Waypoint[] = [
+          { x: shipPos.x, y: shipPos.y },
+          ...(startsAtFirstHop ? retreatPath.slice(1) : retreatPath).map((p) => ({ x: p.x, y: p.y })),
+        ];
+        const { departedAt, arrivalAt } = planTravelAlongPath(waypoints);
+        const dest = waypoints[waypoints.length - 1];
+
+        await db.sql`
+          update ships
+          set x = ${shipPos.x}, y = ${shipPos.y},
+              dest_x = ${dest.x}, dest_y = ${dest.y}, dest_planet = 'Kuat',
+              path = ${JSON.stringify(waypoints)}::jsonb,
+              departed_at = ${departedAt.toISOString()}, arrival_at = ${arrivalAt.toISOString()},
+              damaged = true,
+              encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
+              encounter_win_chance = null, encounter_enemy_faction = null, encounter_npc_ship_id = null,
+              encounter_kind = null, encounter_friendly_count = null, encounter_enemy_count = null,
+              chase_target_id = null, chasing_boss_id = null,
+              updated_at = now()
+          where id = ${ship.id}::uuid
+        `;
+        ship.x = shipPos.x;
+        ship.y = shipPos.y;
+        ship.dest_x = dest.x;
+        ship.dest_y = dest.y;
+        ship.dest_planet = "Kuat";
+        ship.path = waypoints;
+        ship.departed_at = departedAt.toISOString();
+        ship.arrival_at = arrivalAt.toISOString();
+        ship.damaged = true;
+        ship.encounter_pending = false;
+        ship.chase_target_id = null;
+        ship.chasing_boss_id = null;
+        await db.sql`update fleets set losses = losses + 1, updated_at = now() where id = ${ship.fleet_id}::uuid`;
       }
     }
 
@@ -809,10 +891,11 @@ export async function GET() {
         hitsRequired: boss.hits_required,
         winChance: boss.win_chance,
         targetPlanet: boss.target_planet,
+        targetFleetId: boss.target_fleet_id,
       }
     : null;
 
-  // planètes capturées par le boss (page de contrôle Owner) — verdies
+  // planètes capturées par le boss (page de contrôle secrète) — verdies
   // sur la carte ("Hostile"), indépendamment du sort du boss lui-même.
   const hostileRows = await db.sql<{ planet_name: string }>`select planet_name from boss_hostile_planets`;
   const hostilePlanets = hostileRows.map((r) => r.planet_name);

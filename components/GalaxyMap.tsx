@@ -28,6 +28,7 @@ import { availablePlanetAction, ACTION_LABEL, type PlanetAction } from "@/lib/pl
 const UNLOCKED_FLEETS_KEY = "atlas_unlocked_fleets";
 const UNLOCKED_SHIPS_KEY = "atlas_unlocked_ships";
 const UNLOCKED_CAPTAINS_KEY = "atlas_unlocked_captains";
+const BOSS_CONTROL_KEY = "atlas_boss_control_code";
 
 function mulberry32(seed: number) {
   return function () {
@@ -105,6 +106,26 @@ export default function GalaxyMap() {
       return [];
     }
   });
+  // code secret du boss — jamais affiché nulle part, juste retenu tel
+  // quel pour ré-authentifier chaque action (spawn/despawn/focus)
+  const [bossControlCode, setBossControlCode] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      return localStorage.getItem(BOSS_CONTROL_KEY);
+    } catch {
+      return null;
+    }
+  });
+  function persistBossControlCode(code: string | null) {
+    setBossControlCode(code);
+    try {
+      if (code) localStorage.setItem(BOSS_CONTROL_KEY, code);
+      else localStorage.removeItem(BOSS_CONTROL_KEY);
+    } catch {
+      // stockage indisponible : la session en mémoire suffit
+    }
+  }
+
   const [fleetsOpen, setFleetsOpen] = useState(false);
   const [unlockCode, setUnlockCode] = useState("");
   const [unlockError, setUnlockError] = useState<string | null>(null);
@@ -259,6 +280,17 @@ export default function GalaxyMap() {
             },
           ]);
         }
+        setUnlockCode("");
+        return;
+      }
+
+      const bossRes = await fetch("/api/boss/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: trimmed, action: "check" }),
+      });
+      if (bossRes.ok) {
+        persistBossControlCode(trimmed);
         setUnlockCode("");
         return;
       }
@@ -487,6 +519,39 @@ export default function GalaxyMap() {
       setFleetNotice("erreur réseau");
     } finally {
       setChasingNpc(false);
+    }
+  }
+
+  // panneau de contrôle secret du boss (déverrouillé via son code dans
+  // "Mes Flottes", voir unlockAny) — Spawn/Despawn et Focus (planète à
+  // capturer ou flotte à traquer)
+  const [bossControlBusy, setBossControlBusy] = useState(false);
+  const [bossFocusPlanet, setBossFocusPlanet] = useState(() => PLANETS.find((p) => p.name !== "Coruscant")?.name ?? "");
+  const [bossFocusFleetQuery, setBossFocusFleetQuery] = useState("");
+
+  async function bossControl(action: string, extra?: Record<string, unknown>) {
+    if (!bossControlCode) return;
+    setBossControlBusy(true);
+    try {
+      const res = await fetch("/api/boss/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: bossControlCode, action, ...extra }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFleetNotice(data.error ?? "échec de l'action");
+        return;
+      }
+      if (action === "spawn") setFleetNotice(`Boss apparu sur ${data.spawnPlanet}`);
+      else if (action === "despawn") setFleetNotice("Boss retiré");
+      else if (action === "focus-planet") setFleetNotice(`Boss envoyé capturer ${data.targetPlanet}`);
+      else if (action === "focus-fleet") setFleetNotice(`Boss lancé à la poursuite de ${data.targetFleet}`);
+      else if (action === "clear-focus") setFleetNotice("Directive annulée");
+    } catch {
+      setFleetNotice("erreur réseau");
+    } finally {
+      setBossControlBusy(false);
     }
   }
 
@@ -1135,9 +1200,72 @@ export default function GalaxyMap() {
                     ))}
                   </div>
                 )}
-                {unlockedFleets.length === 0 && unlockedShips.length === 0 && unlockedCaptains.length === 0 && (
-                  <div className={styles.fleetsEmpty}>Rien de déverrouillé pour le moment.</div>
+                {bossControlCode && (
+                  <div className={styles.fleetsGroup}>
+                    <div className={styles.fleetsGroupLabel}>☣ Contrôle du boss</div>
+                    <div className={styles.fleetRow}>
+                      <span className={styles.fleetName}>{boss ? boss.name : "Aucun boss actif"}</span>
+                      <button
+                        className={styles.fleetActionBtn}
+                        disabled={bossControlBusy}
+                        onClick={() => bossControl(boss ? "despawn" : "spawn")}
+                      >
+                        {boss ? "Despawn" : "Spawn"}
+                      </button>
+                      <button className={styles.fleetForget} onClick={() => persistBossControlCode(null)}>
+                        oublier
+                      </button>
+                    </div>
+                    {boss && (
+                      <>
+                        <div className={styles.fleetRow}>
+                          <select value={bossFocusPlanet} onChange={(e) => setBossFocusPlanet(e.target.value)}>
+                            {PLANETS.filter((p) => p.name !== "Coruscant").map((p) => (
+                              <option key={p.name} value={p.name}>
+                                {p.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            className={styles.fleetActionBtn}
+                            disabled={bossControlBusy}
+                            onClick={() => bossControl("focus-planet", { planetName: bossFocusPlanet })}
+                          >
+                            Focus planète
+                          </button>
+                        </div>
+                        <div className={styles.fleetRow}>
+                          <input
+                            placeholder="Nom ou code de la flotte à traquer"
+                            value={bossFocusFleetQuery}
+                            onChange={(e) => setBossFocusFleetQuery(e.target.value)}
+                          />
+                          <button
+                            className={styles.fleetActionBtn}
+                            disabled={bossControlBusy || !bossFocusFleetQuery.trim()}
+                            onClick={() => bossControl("focus-fleet", { fleetQuery: bossFocusFleetQuery.trim() })}
+                          >
+                            Focus flotte
+                          </button>
+                        </div>
+                        {(boss.targetPlanet || boss.targetFleetId) && (
+                          <div className={styles.fleetRow}>
+                            <span className={styles.fleetStatus}>
+                              Directive : {boss.targetPlanet ? `capturer ${boss.targetPlanet}` : "traquer une flotte"}
+                            </span>
+                            <button className={styles.fleetForget} onClick={() => bossControl("clear-focus")}>
+                              annuler
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
                 )}
+                {unlockedFleets.length === 0 &&
+                  unlockedShips.length === 0 &&
+                  unlockedCaptains.length === 0 &&
+                  !bossControlCode && <div className={styles.fleetsEmpty}>Rien de déverrouillé pour le moment.</div>}
                 <form
                   className={styles.fleetUnlockForm}
                   onSubmit={(e) => {
