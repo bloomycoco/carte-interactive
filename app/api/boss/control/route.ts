@@ -54,6 +54,9 @@ export async function POST(request: Request) {
           encounter_win_chance = null, encounter_kind = null, updated_at = now()
       where encounter_kind = 'boss'
     `;
+    // sans boss, plus personne ne contrôle les planètes qu'il avait
+    // capturées — elles redeviennent normales (plus de "Hostile" vert)
+    await db.sql`delete from boss_hostile_planets`;
     return NextResponse.json({ ok: true });
   }
 
