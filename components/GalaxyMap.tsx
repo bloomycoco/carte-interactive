@@ -524,10 +524,10 @@ export default function GalaxyMap() {
 
   // panneau de contrôle secret du boss (déverrouillé via son code dans
   // "Mes Flottes", voir unlockAny) — Spawn/Despawn et Focus (planète à
-  // capturer ou flotte à traquer)
+  // capturer ou vaisseau précis à traquer)
   const [bossControlBusy, setBossControlBusy] = useState(false);
   const [bossFocusPlanet, setBossFocusPlanet] = useState(() => PLANETS.find((p) => p.name !== "Coruscant")?.name ?? "");
-  const [bossFocusFleetQuery, setBossFocusFleetQuery] = useState("");
+  const [bossFocusShipQuery, setBossFocusShipQuery] = useState("");
 
   async function bossControl(action: string, extra?: Record<string, unknown>) {
     if (!bossControlCode) return;
@@ -546,7 +546,7 @@ export default function GalaxyMap() {
       if (action === "spawn") setFleetNotice(`Boss apparu sur ${data.spawnPlanet}`);
       else if (action === "despawn") setFleetNotice("Boss retiré");
       else if (action === "focus-planet") setFleetNotice(`Boss envoyé capturer ${data.targetPlanet}`);
-      else if (action === "focus-fleet") setFleetNotice(`Boss lancé à la poursuite de ${data.targetFleet}`);
+      else if (action === "focus-ship") setFleetNotice(`Boss lancé à la poursuite de ${data.targetShip}`);
       else if (action === "clear-focus") setFleetNotice("Directive annulée");
     } catch {
       setFleetNotice("erreur réseau");
@@ -1241,22 +1241,22 @@ export default function GalaxyMap() {
                         <div className={styles.fleetRow}>
                           <input
                             className={styles.bossFocusInput}
-                            placeholder="Nom ou code de la flotte à traquer"
-                            value={bossFocusFleetQuery}
-                            onChange={(e) => setBossFocusFleetQuery(e.target.value)}
+                            placeholder="Nom ou code du vaisseau à traquer"
+                            value={bossFocusShipQuery}
+                            onChange={(e) => setBossFocusShipQuery(e.target.value)}
                           />
                           <button
                             className={styles.fleetActionBtn}
-                            disabled={bossControlBusy || !bossFocusFleetQuery.trim()}
-                            onClick={() => bossControl("focus-fleet", { fleetQuery: bossFocusFleetQuery.trim() })}
+                            disabled={bossControlBusy || !bossFocusShipQuery.trim()}
+                            onClick={() => bossControl("focus-ship", { shipQuery: bossFocusShipQuery.trim() })}
                           >
-                            Focus flotte
+                            Focus vaisseau
                           </button>
                         </div>
-                        {(boss.targetPlanet || boss.targetFleetId) && (
+                        {(boss.targetPlanet || boss.targetShipId) && (
                           <div className={styles.fleetRow}>
                             <span className={styles.fleetStatus}>
-                              Directive : {boss.targetPlanet ? `capturer ${boss.targetPlanet}` : "traquer une flotte"}
+                              Directive : {boss.targetPlanet ? `capturer ${boss.targetPlanet}` : "traquer un vaisseau"}
                             </span>
                             <button className={styles.fleetForget} onClick={() => bossControl("clear-focus")}>
                               annuler

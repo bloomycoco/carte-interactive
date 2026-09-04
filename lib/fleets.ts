@@ -401,15 +401,18 @@ export function pickNpcRoute(
   return { destination, path };
 }
 
-// Boss galactique unique (Summa-verminoth, page Owner) : se balade
-// PARTOUT sauf Coruscant, jamais confiné à un territoire — contrairement
-// aux flottes NPC de clan. Ses chances de combat sont toujours fixées
-// (BOSS_WIN_CHANCE), quelle que soit la force qui l'affronte : ce n'est
-// pas un adversaire qu'on écrase en se regroupant, il faut l'affronter
-// BOSS_HITS_REQUIRED fois de suite pour l'abattre.
+// Boss galactique unique (Summa-verminoth, contrôle par code secret) :
+// se balade PARTOUT sauf Coruscant, jamais confiné à un territoire —
+// contrairement aux flottes NPC de clan. Ses chances de combat sont
+// toujours fixées (BOSS_WIN_CHANCE), quelle que soit la force qui
+// l'affronte : ce n'est pas un adversaire qu'on écrase en se
+// regroupant, il faut l'affronter BOSS_HITS_REQUIRED fois de suite pour
+// l'abattre. Vraiment énorme, il se déplace bien plus lentement qu'un
+// vaisseau ordinaire (BOSS_SPEED_MULTIPLIER).
 export const BOSS_NAME = "Summa-verminoth";
-export const BOSS_WIN_CHANCE = 30;
+export const BOSS_WIN_CHANCE = 50;
 export const BOSS_HITS_REQUIRED = 10;
+export const BOSS_SPEED_MULTIPLIER = 0.4;
 
 const BOSS_ALLOWED_PLANETS = new Set(PLANETS.filter((p) => p.name !== "Coruscant").map((p) => p.name));
 

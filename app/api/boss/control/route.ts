@@ -14,7 +14,8 @@ import {
 // peut agir, indépendamment de toute session. Saisi comme un code de
 // flotte/vaisseau normal dans "Mes Flottes" (voir unlockAny côté
 // client), il révèle deux actions : Spawn/Despawn et Focus (cibler une
-// planète à capturer OU une flotte à traquer — mutuellement exclusifs).
+// planète à capturer OU un vaisseau précis à traquer — mutuellement
+// exclusifs).
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const code = typeof body?.code === "string" ? body.code.trim() : "";
@@ -74,30 +75,31 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, targetPlanet });
   }
 
-  if (action === "focus-fleet") {
-    const query = typeof body?.fleetQuery === "string" ? body.fleetQuery.trim() : "";
-    if (!query) return NextResponse.json({ error: "nom ou code de flotte requis" }, { status: 400 });
+  if (action === "focus-ship") {
+    const query = typeof body?.shipQuery === "string" ? body.shipQuery.trim() : "";
+    if (!query) return NextResponse.json({ error: "nom ou code de vaisseau requis" }, { status: 400 });
     const [boss] = await db.sql<{ id: string }>`select id from boss where alive = true limit 1`;
     if (!boss) return NextResponse.json({ error: "aucun boss actif" }, { status: 404 });
-    const [fleet] = await db.sql<{ id: string; name: string }>`
-      select id, name from fleets
-      where faction = 'republique' and is_npc = false
-        and (upper(name) = upper(${query}) or upper(code) = upper(${query}))
+    const [ship] = await db.sql<{ id: string; name: string }>`
+      select s.id, s.name from ships s
+      join fleets f on f.id = s.fleet_id
+      where f.faction = 'republique' and f.is_npc = false
+        and (upper(s.name) = upper(${query}) or upper(s.code) = upper(${query}))
       limit 1
     `;
-    if (!fleet) return NextResponse.json({ error: "flotte introuvable" }, { status: 404 });
+    if (!ship) return NextResponse.json({ error: "vaisseau introuvable" }, { status: 404 });
     await db.sql`
-      update boss set target_fleet_id = ${fleet.id}::uuid, target_planet = null, updated_at = now()
+      update boss set target_ship_id = ${ship.id}::uuid, target_planet = null, updated_at = now()
       where id = ${boss.id}::uuid
     `;
-    return NextResponse.json({ ok: true, targetFleet: fleet.name });
+    return NextResponse.json({ ok: true, targetShip: ship.name });
   }
 
   if (action === "clear-focus") {
     const [boss] = await db.sql<{ id: string }>`select id from boss where alive = true limit 1`;
     if (!boss) return NextResponse.json({ error: "aucun boss actif" }, { status: 404 });
     await db.sql`
-      update boss set target_planet = null, target_fleet_id = null, updated_at = now()
+      update boss set target_planet = null, target_ship_id = null, updated_at = now()
       where id = ${boss.id}::uuid
     `;
     return NextResponse.json({ ok: true });
