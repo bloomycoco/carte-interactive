@@ -69,7 +69,7 @@ export async function POST(request: Request) {
     const [boss] = await db.sql<{ id: string }>`select id from boss where alive = true limit 1`;
     if (!boss) return NextResponse.json({ error: "aucun boss actif" }, { status: 404 });
     await db.sql`
-      update boss set target_planet = ${targetPlanet}, target_fleet_id = null, updated_at = now()
+      update boss set target_planet = ${targetPlanet}, target_ship_id = null, updated_at = now()
       where id = ${boss.id}::uuid
     `;
     return NextResponse.json({ ok: true, targetPlanet });
