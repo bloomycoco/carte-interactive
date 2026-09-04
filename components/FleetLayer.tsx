@@ -31,7 +31,6 @@ export default function FleetLayer({
           status += s.quest_phase === "fetching" ? " (chercher des vivres)" : " (ramener les vivres)";
         else if (s.damaged) status += " (endommagé)";
         else if (s.chase_target_id) status += " (en chasse)";
-        else if (s.chasing_boss_id) status += " (en chasse du boss)";
         return (
           <div
             key={s.id}

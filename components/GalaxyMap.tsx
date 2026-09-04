@@ -7,7 +7,6 @@ import FleetLayer from "./FleetLayer";
 import {
   currentPosition,
   isActionActive,
-  type PublicBoss,
   type PublicShip,
   type UnlockedCaptainFleet,
   type UnlockedFleet,
@@ -28,7 +27,6 @@ import { availablePlanetAction, ACTION_LABEL, type PlanetAction } from "@/lib/pl
 const UNLOCKED_FLEETS_KEY = "atlas_unlocked_fleets";
 const UNLOCKED_SHIPS_KEY = "atlas_unlocked_ships";
 const UNLOCKED_CAPTAINS_KEY = "atlas_unlocked_captains";
-const BOSS_CONTROL_KEY = "atlas_boss_control_code";
 
 function mulberry32(seed: number) {
   return function () {
@@ -63,7 +61,6 @@ export default function GalaxyMap() {
 
   const [selected, setSelected] = useState<Planet | null>(null);
   const [selectedShipId, setSelectedShipId] = useState<string | null>(null);
-  const [bossPanelOpen, setBossPanelOpen] = useState(false);
   const [hiddenFactions, setHiddenFactions] = useState<Set<Faction>>(new Set());
   const [query, setQuery] = useState("");
   const [dragging, setDragging] = useState(false);
@@ -75,10 +72,6 @@ export default function GalaxyMap() {
   const [planetInfluence, setPlanetInfluence] = useState<
     Record<string, { republicPct: number; csiAttackAt: string | null }>
   >({});
-  // boss galactique (null si aucun n'est vivant) et planètes qu'il a
-  // capturées ("Hostile", verdies sur la carte) — voir la page Owner
-  const [boss, setBoss] = useState<PublicBoss | null>(null);
-  const [hostilePlanets, setHostilePlanets] = useState<string[]>([]);
   const [unlockedFleets, setUnlockedFleets] = useState<UnlockedFleet[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -106,26 +99,6 @@ export default function GalaxyMap() {
       return [];
     }
   });
-  // code secret du boss — jamais affiché nulle part, juste retenu tel
-  // quel pour ré-authentifier chaque action (spawn/despawn/focus)
-  const [bossControlCode, setBossControlCode] = useState<string | null>(() => {
-    if (typeof window === "undefined") return null;
-    try {
-      return localStorage.getItem(BOSS_CONTROL_KEY);
-    } catch {
-      return null;
-    }
-  });
-  function persistBossControlCode(code: string | null) {
-    setBossControlCode(code);
-    try {
-      if (code) localStorage.setItem(BOSS_CONTROL_KEY, code);
-      else localStorage.removeItem(BOSS_CONTROL_KEY);
-    } catch {
-      // stockage indisponible : la session en mémoire suffit
-    }
-  }
-
   const [fleetsOpen, setFleetsOpen] = useState(false);
   const [unlockCode, setUnlockCode] = useState("");
   const [unlockError, setUnlockError] = useState<string | null>(null);
@@ -173,8 +146,6 @@ export default function GalaxyMap() {
         if (!cancelled && res.ok) {
           setShips(data.ships ?? []);
           setPlanetInfluence(data.planetInfluence ?? {});
-          setBoss(data.boss ?? null);
-          setHostilePlanets(data.hostilePlanets ?? []);
         }
       } catch {
         // réseau indisponible : on retentera au prochain tick
@@ -280,17 +251,6 @@ export default function GalaxyMap() {
             },
           ]);
         }
-        setUnlockCode("");
-        return;
-      }
-
-      const bossRes = await fetch("/api/boss/control", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: trimmed, action: "check" }),
-      });
-      if (bossRes.ok) {
-        persistBossControlCode(trimmed);
         setUnlockCode("");
         return;
       }
@@ -463,98 +423,6 @@ export default function GalaxyMap() {
     }
   }
 
-  // prend le BOSS galactique en chasse — un seul vaisseau
-  async function chaseBoss(shipId: string) {
-    const unlocked = unlockedShips.find((u) => u.id === shipId);
-    if (!unlocked) return;
-    setChasingNpc(true);
-    try {
-      const res = await fetch(`/api/ships/${shipId}/boss-chase`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: unlocked.code }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setFleetNotice(data.error ?? "échec de la prise en chasse");
-        return;
-      }
-      if (data.ship) {
-        setShips((prev) => prev.map((s) => (s.id === shipId ? { ...s, ...data.ship } : s)));
-      }
-      setBossPanelOpen(false);
-    } catch {
-      setFleetNotice("erreur réseau");
-    } finally {
-      setChasingNpc(false);
-    }
-  }
-
-  // prend le BOSS galactique en chasse — toute une flotte (code Capitaine)
-  async function chaseBossFleet(fleetId: string) {
-    const unlocked = unlockedCaptains.find((u) => u.id === fleetId);
-    if (!unlocked) return;
-    setChasingNpc(true);
-    try {
-      const res = await fetch(`/api/fleets/${fleetId}/boss-chase`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: unlocked.code }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setFleetNotice(data.error ?? "échec de la prise en chasse");
-        return;
-      }
-      const chasing = (data.results as { status: "chasing" | "skipped" }[]).filter(
-        (r) => r.status === "chasing",
-      ).length;
-      const skipped = data.results.length - chasing;
-      setFleetNotice(
-        `${unlocked.name} : ${chasing} vaisseau(x) en chasse du boss` +
-          (skipped > 0 ? `, ${skipped} occupé(s) ignoré(s)` : ""),
-      );
-      setBossPanelOpen(false);
-    } catch {
-      setFleetNotice("erreur réseau");
-    } finally {
-      setChasingNpc(false);
-    }
-  }
-
-  // panneau de contrôle secret du boss (déverrouillé via son code dans
-  // "Mes Flottes", voir unlockAny) — Spawn/Despawn et Focus (planète à
-  // capturer ou vaisseau précis à traquer)
-  const [bossControlBusy, setBossControlBusy] = useState(false);
-  const [bossFocusPlanet, setBossFocusPlanet] = useState(() => PLANETS.find((p) => p.name !== "Coruscant")?.name ?? "");
-  const [bossFocusShipQuery, setBossFocusShipQuery] = useState("");
-
-  async function bossControl(action: string, extra?: Record<string, unknown>) {
-    if (!bossControlCode) return;
-    setBossControlBusy(true);
-    try {
-      const res = await fetch("/api/boss/control", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: bossControlCode, action, ...extra }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setFleetNotice(data.error ?? "échec de l'action");
-        return;
-      }
-      if (action === "spawn") setFleetNotice(`Boss apparu sur ${data.spawnPlanet}`);
-      else if (action === "despawn") setFleetNotice("Boss retiré");
-      else if (action === "focus-planet") setFleetNotice(`Boss envoyé capturer ${data.targetPlanet}`);
-      else if (action === "focus-ship") setFleetNotice(`Boss lancé à la poursuite de ${data.targetShip}`);
-      else if (action === "clear-focus") setFleetNotice("Directive annulée");
-    } catch {
-      setFleetNotice("erreur réseau");
-    } finally {
-      setBossControlBusy(false);
-    }
-  }
-
   // une flotte ennemie a été croisée par un vaisseau qu'on contrôle et
   // attend une décision (combattre / fuir)
   const encounterShip = ships.find(
@@ -564,18 +432,6 @@ export default function GalaxyMap() {
       s.encounter_at &&
       new Date(s.encounter_at).getTime() <= now,
   );
-  // combien de NOS vaisseaux ont rattrapé le boss et attendent une
-  // décision en même temps (ex: toute une flotte envoyée en chasse
-  // groupée) — résolus un par un, mais le compte aide à savoir qu'il en
-  // reste d'autres après celui-ci
-  const pendingBossCount = ships.filter(
-    (s) =>
-      unlockedShips.some((u) => u.id === s.id) &&
-      s.encounter_pending &&
-      s.encounter_kind === "boss" &&
-      s.encounter_at &&
-      new Date(s.encounter_at).getTime() <= now,
-  ).length;
 
   async function resolveEncounter(shipId: string, choice: "fight" | "negotiate" | "flee" | "sneak") {
     const unlocked = unlockedShips.find((u) => u.id === shipId);
@@ -876,7 +732,6 @@ export default function GalaxyMap() {
     };
     apply();
     setSelected(p);
-    setBossPanelOpen(false);
   }
 
   function toggleFaction(f: Faction) {
@@ -998,10 +853,8 @@ export default function GalaxyMap() {
             // une planète ennemie où la République a pris le dessus (>
             // 50% d'influence, voir attaquer la planète) se teinte en bleu
             const contested = planetInfluence[p.name];
-            const isHostile = hostilePlanets.includes(p.name);
-            const dotColor = isHostile
-              ? "var(--boss)"
-              : contested != null && contested.republicPct > 50
+            const dotColor =
+              contested != null && contested.republicPct > 50
                 ? FACTION_META.republique.color
                 : meta.color;
             // une contre-attaque CSI en approche fait clignoter la
@@ -1029,7 +882,6 @@ export default function GalaxyMap() {
                 onClick={() => {
                   setSelected(p);
                   setSelectedShipId(null);
-                  setBossPanelOpen(false);
                 }}
               >
                 <div className={styles.dot} />
@@ -1045,28 +897,8 @@ export default function GalaxyMap() {
             onSelectShip={(shipId) => {
               setSelectedShipId(shipId);
               setSelected(null);
-              setBossPanelOpen(false);
             }}
           />
-
-          {boss &&
-            (() => {
-              const pos = currentPosition(boss, now);
-              return (
-                <div
-                  className={styles.bossMarker}
-                  style={{ left: pos.x, top: pos.y }}
-                  title={`${boss.name} — ${boss.hits}/${boss.hitsRequired} coups portés`}
-                  onClick={() => {
-                    setBossPanelOpen(true);
-                    setSelectedShipId(null);
-                    setSelected(null);
-                  }}
-                >
-                  <div className={styles.bossTriangle} />
-                </div>
-              );
-            })()}
         </div>
       </div>
 
@@ -1212,77 +1044,9 @@ export default function GalaxyMap() {
                     ))}
                   </div>
                 )}
-                {bossControlCode && (
-                  <div className={styles.fleetsGroup}>
-                    <div className={styles.fleetsGroupLabel}>☣ Contrôle du boss</div>
-                    <div className={styles.fleetRow}>
-                      <span className={styles.fleetName}>{boss ? boss.name : "Aucun boss actif"}</span>
-                      <button
-                        className={styles.fleetActionBtn}
-                        disabled={bossControlBusy}
-                        onClick={() => bossControl(boss ? "despawn" : "spawn")}
-                      >
-                        {boss ? "Despawn" : "Spawn"}
-                      </button>
-                      <button className={styles.fleetForget} onClick={() => persistBossControlCode(null)}>
-                        oublier
-                      </button>
-                    </div>
-                    {boss && (
-                      <>
-                        <div className={styles.fleetRow}>
-                          <select
-                            className={styles.bossFocusInput}
-                            value={bossFocusPlanet}
-                            onChange={(e) => setBossFocusPlanet(e.target.value)}
-                          >
-                            {PLANETS.filter((p) => p.name !== "Coruscant").map((p) => (
-                              <option key={p.name} value={p.name}>
-                                {p.name}
-                              </option>
-                            ))}
-                          </select>
-                          <button
-                            className={styles.fleetActionBtn}
-                            disabled={bossControlBusy}
-                            onClick={() => bossControl("focus-planet", { planetName: bossFocusPlanet })}
-                          >
-                            Focus planète
-                          </button>
-                        </div>
-                        <div className={styles.fleetRow}>
-                          <input
-                            className={styles.bossFocusInput}
-                            placeholder="Nom ou code du vaisseau à traquer"
-                            value={bossFocusShipQuery}
-                            onChange={(e) => setBossFocusShipQuery(e.target.value)}
-                          />
-                          <button
-                            className={styles.fleetActionBtn}
-                            disabled={bossControlBusy || !bossFocusShipQuery.trim()}
-                            onClick={() => bossControl("focus-ship", { shipQuery: bossFocusShipQuery.trim() })}
-                          >
-                            Focus vaisseau
-                          </button>
-                        </div>
-                        {(boss.targetPlanet || boss.targetShipId) && (
-                          <div className={styles.fleetRow}>
-                            <span className={styles.fleetStatus}>
-                              Directive : {boss.targetPlanet ? `capturer ${boss.targetPlanet}` : "traquer un vaisseau"}
-                            </span>
-                            <button className={styles.fleetForget} onClick={() => bossControl("clear-focus")}>
-                              annuler
-                            </button>
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-                )}
                 {unlockedFleets.length === 0 &&
                   unlockedShips.length === 0 &&
-                  unlockedCaptains.length === 0 &&
-                  !bossControlCode && <div className={styles.fleetsEmpty}>Rien de déverrouillé pour le moment.</div>}
+                  unlockedCaptains.length === 0 && <div className={styles.fleetsEmpty}>Rien de déverrouillé pour le moment.</div>}
                 <form
                   className={styles.fleetUnlockForm}
                   onSubmit={(e) => {
@@ -1306,82 +1070,9 @@ export default function GalaxyMap() {
         </div>
       </div>
 
-      {boss && (
-        <div className={styles.bossHud} onClick={() => setBossPanelOpen(true)}>
-          <div className={styles.bossHudHead}>
-            <span className={styles.bossHudTriangle} />
-            <span className={styles.bossHudName}>{boss.name}</span>
-          </div>
-          <div className={styles.bossHudBar}>
-            <div
-              className={styles.bossHudFill}
-              style={{ width: `${(boss.hits / boss.hitsRequired) * 100}%` }}
-            />
-          </div>
-          <div className={styles.bossHudCount}>
-            {boss.hits} / {boss.hitsRequired}
-          </div>
-        </div>
-      )}
-
       {fleetNotice && <div className={styles.fleetToast}>{fleetNotice}</div>}
 
-      {encounterShip && encounterShip.encounter_kind === "boss" && (
-        <div className={styles.encounterOverlay}>
-          <div className={styles.bossEncounterModal}>
-            <div className={styles.bossEncounterTitle}>⚠ Combat contre {boss?.name ?? "le boss"} !</div>
-            {boss && (
-              <div className={styles.bossEncounterBanner}>
-                <div className={styles.bossHudBar}>
-                  <div
-                    className={styles.bossHudFill}
-                    style={{ width: `${(boss.hits / boss.hitsRequired) * 100}%` }}
-                  />
-                </div>
-                <div className={styles.bossHudCount}>
-                  {boss.hits} / {boss.hitsRequired} coups portés
-                </div>
-              </div>
-            )}
-            <p className={styles.encounterText}>
-              <strong>{encounterShip.name}</strong> l&apos;a rattrapé. Que fait l&apos;équipage ?
-            </p>
-            {pendingBossCount > 1 && (
-              <p className={styles.encounterOdds}>
-                {pendingBossCount - 1} autre{pendingBossCount - 1 > 1 ? "s" : ""} de tes vaisseaux attend
-                {pendingBossCount - 1 > 1 ? "ent" : ""} aussi une décision.
-              </p>
-            )}
-            {encounterShip.encounter_win_chance != null && (
-              <p className={styles.encounterOdds}>
-                Chances de victoire au combat : <strong>{encounterShip.encounter_win_chance}%</strong>
-              </p>
-            )}
-            <div className={styles.encounterActions}>
-              <button
-                className={styles.bossEncounterFight}
-                disabled={resolvingEncounter}
-                onClick={() => resolveEncounter(encounterShip.id, "fight")}
-              >
-                ⚔ Combattre{encounterShip.encounter_win_chance != null ? ` (${encounterShip.encounter_win_chance}%)` : ""}
-              </button>
-              <button
-                className={styles.bossEncounterFlee}
-                disabled={resolvingEncounter}
-                onClick={() => resolveEncounter(encounterShip.id, "flee")}
-              >
-                Fuir
-              </button>
-            </div>
-            <p className={styles.encounterHint}>
-              Aucune négociation possible avec le boss. Fuir est sans risque mais replie le vaisseau vers Kuat.
-              Combattre et perdre l&apos;endommage et le force à rallier Kuat.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {encounterShip && encounterShip.encounter_kind !== "boss" && (
+      {encounterShip && (
         <div className={styles.encounterOverlay}>
           <div className={styles.encounterModal}>
             <div className={styles.encounterTitle}>
@@ -1558,61 +1249,17 @@ export default function GalaxyMap() {
         ))}
       </div>
 
-      <div className={`${styles.panel} ${selected || selectedShip || selectedNpc || bossPanelOpen ? styles.open : ""}`}>
+      <div className={`${styles.panel} ${selected || selectedShip || selectedNpc ? styles.open : ""}`}>
         <button
           className={styles.panelClose}
           onClick={() => {
             setSelected(null);
             setSelectedShipId(null);
-            setBossPanelOpen(false);
           }}
         >
           ✕
         </button>
-        {bossPanelOpen && boss ? (
-          <div style={{ ["--f" as string]: "var(--boss)" }}>
-            <div className={styles.panelFaction}>
-              <span className={styles.swatch} />
-              Boss galactique
-            </div>
-            <h2>{boss.name}</h2>
-            <div className={styles.system}>
-              {boss.hits} / {boss.hitsRequired} coups portés — {boss.winChance}% de chances par combat
-            </div>
-            <div className={styles.coords}>
-              <div>
-                DERNIÈRE PLANÈTE <b>{nearestPlanet(boss.x, boss.y).name}</b>
-              </div>
-            </div>
-            <div className={styles.panelActions}>
-              {unlockedCaptains.map((u) => (
-                <button
-                  key={u.id}
-                  className={styles.actionBtn}
-                  disabled={chasingNpc}
-                  onClick={() => chaseBossFleet(u.id)}
-                >
-                  ⚔ Toute la flotte en chasse — {u.name}
-                </button>
-              ))}
-              {unlockedShips.length > 0 ? (
-                unlockedShips.map((u) => (
-                  <button key={u.id} className={styles.actionBtn} disabled={chasingNpc} onClick={() => chaseBoss(u.id)}>
-                    ⚔ Prendre en chasse — {u.name}
-                  </button>
-                ))
-              ) : unlockedCaptains.length === 0 ? (
-                <button
-                  className={`${styles.actionBtn} ${styles.actionBtnDisabled}`}
-                  disabled
-                  title="Déverrouille un vaisseau ou une flotte (bouton « Mes Flottes ») pour le prendre en chasse"
-                >
-                  Prendre en chasse
-                </button>
-              ) : null}
-            </div>
-          </div>
-        ) : selectedShip ? (
+        {selectedShip ? (
           <div>
             <div
               className={styles.panelFaction}
@@ -1702,9 +1349,6 @@ export default function GalaxyMap() {
                 SECT.Y <b>{selected.y}</b>
               </div>
             </div>
-            {hostilePlanets.includes(selected.name) && (
-              <div className={styles.hostileBanner}>☣ Sous contrôle Hostile — capturée par {boss?.name ?? "le boss"}</div>
-            )}
             {(selected.faction === "csi" || selected.faction === "mandalore") && (
               <div className={styles.influenceGauge}>
                 <div className={styles.influenceLabel}>

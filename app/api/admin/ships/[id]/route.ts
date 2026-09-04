@@ -56,7 +56,7 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/ship
           encounter_pending = false, encounter_at = null, encounter_x = null, encounter_y = null,
           encounter_win_chance = null, encounter_enemy_faction = null, encounter_npc_ship_id = null,
           encounter_kind = null, encounter_friendly_count = null, encounter_enemy_count = null,
-          chase_target_id = null, chasing_boss_id = null,
+          chase_target_id = null,
           action_type = null, action_started_at = null, action_ends_at = null,
           quest_type = null, quest_origin_planet = null, quest_target_planet = null, quest_phase = null,
           updated_at = now()

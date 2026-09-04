@@ -10,7 +10,7 @@ import {
 } from "@/lib/fleets";
 import { nearestPlanet, shortestPath } from "@/lib/routes";
 
-// Résout une rencontre en cours. Quatre sortes :
+// Résout une rencontre en cours. Trois sortes :
 // - "transit" (croisement en plein vol) : combattre, négocier le
 //   passage (très souvent réussi, sinon un combat s'engage quand même —
 //   sauf contre la CSI, qui ne négocie jamais), ou fuir (toujours
@@ -22,12 +22,7 @@ import { nearestPlanet, shortestPath } from "@/lib/routes";
 // - "chase" (le joueur a délibérément pris le NPC en chasse, voir
 //   POST /api/ships/[id]/chase) : combattre, négocier (sauf CSI), ou
 //   fuir (replie vers Kuat sans dégât, comme "ground" — il n'y a
-//   pas de trajet en cours à annuler) ;
-// - "boss" (le joueur a pris le boss galactique en chasse, voir
-//   POST /api/ships/[id]/boss-chase) : combattre (jamais de
-//   négociation, chances toujours fixées) ou fuir (comme "chase") — une
-//   victoire compte comme un coup porté au boss (voir hitBoss), pas la
-//   destruction d'un vaisseau NPC.
+//   pas de trajet en cours à annuler).
 // Une défaite au combat (choisi ou après un échec de négociation/
 // discrétion) endommage le vaisseau et le force à rallier Kuat ;
 // fuir n'inflige jamais de dégât.
@@ -61,7 +56,7 @@ export async function POST(
     encounter_y: number | null;
     encounter_npc_ship_id: string | null;
     encounter_enemy_faction: string | null;
-    encounter_kind: "transit" | "ground" | "chase" | "boss" | null;
+    encounter_kind: "transit" | "ground" | "chase" | null;
   }>`
     select id, fleet_id, name, code, path, departed_at, arrival_at, encounter_pending, encounter_at,
            encounter_win_chance, encounter_x, encounter_y, encounter_npc_ship_id, encounter_enemy_faction,
@@ -77,13 +72,12 @@ export async function POST(
   }
   const isGround = ship.encounter_kind === "ground";
   const isChase = ship.encounter_kind === "chase";
-  const isBoss = ship.encounter_kind === "boss";
   // en transit, la position figée se retrouve via le trajet en cours si
-  // besoin (voir plus bas) — au sol, en chasse ou contre le boss, un
-  // vaisseau fraîchement à quai (ou qui n'a jamais bougé) peut très bien
-  // ne pas avoir de trajet du tout, ce n'est pas nécessaire :
-  // encounter_x/y suffit toujours.
-  if (!isGround && !isChase && !isBoss && (!ship.path || !ship.departed_at || !ship.arrival_at)) {
+  // besoin (voir plus bas) — au sol ou en chasse, un vaisseau fraîchement
+  // à quai (ou qui n'a jamais bougé) peut très bien ne pas avoir de
+  // trajet du tout, ce n'est pas nécessaire : encounter_x/y suffit
+  // toujours.
+  if (!isGround && !isChase && (!ship.path || !ship.departed_at || !ship.arrival_at)) {
     return NextResponse.json({ error: "aucune rencontre en cours" }, { status: 400 });
   }
   if (isGround && choice === "negotiate") {
@@ -92,10 +86,9 @@ export async function POST(
   if (!isGround && choice === "sneak") {
     return NextResponse.json({ error: "cette option n'est disponible qu'au sol" }, { status: 400 });
   }
-  // la CSI ne négocie jamais (guerre totale), et le boss est une bête,
-  // pas un interlocuteur — dans les deux cas, aucune négociation
-  if (choice === "negotiate" && (ship.encounter_enemy_faction === "csi" || isBoss)) {
-    return NextResponse.json({ error: "impossible de négocier ici" }, { status: 400 });
+  // la CSI ne négocie jamais : guerre totale contre la République
+  if (choice === "negotiate" && ship.encounter_enemy_faction === "csi") {
+    return NextResponse.json({ error: "la CSI ne négocie pas" }, { status: 400 });
   }
 
   const encounterAt = new Date(ship.encounter_at);
@@ -141,19 +134,6 @@ export async function POST(
       update fleets set losses = losses + 1, respawn_at = ${respawnAt}, updated_at = now()
       where id = ${npc.fleet_id}::uuid
     `;
-  }
-
-  // victoire contre le boss : un coup de plus (hits) — s'il atteint
-  // hits_required, le boss meurt (alive = false). Ne détruit aucun
-  // vaisseau, à la différence de destroyNpc.
-  async function hitBoss() {
-    const [boss] = await db.sql<{ id: string; hits: number; hits_required: number }>`
-      select id, hits, hits_required from boss where alive = true order by spawned_at desc limit 1
-    `;
-    if (!boss) return;
-    const newHits = boss.hits + 1;
-    const dead = newHits >= boss.hits_required;
-    await db.sql`update boss set hits = ${newHits}, alive = ${!dead}, updated_at = now() where id = ${boss.id}::uuid`;
   }
 
   async function resume(outcome: "won" | "negotiated" | "sneaked") {
@@ -220,10 +200,10 @@ export async function POST(
 
   if (choice === "flee") {
     await releaseNpc();
-    if (isGround || isChase || isBoss) {
-      // au sol, en chasse, ou contre le boss : fuir quitte précipitamment
-      // vers Kuat, sans dégât (contrairement à une défaite au combat) —
-      // il n'y a pas de "trajet en cours" à annuler dans ces trois cas
+    if (isGround || isChase) {
+      // au sol ou en chasse : fuir quitte précipitamment vers Kuat,
+      // sans dégât (contrairement à une défaite au combat) — il n'y a
+      // pas de "trajet en cours" à annuler dans ces deux cas
       const originPlanet = nearestPlanet(frozenPos.x, frozenPos.y);
       const retreatPath = shortestPath(originPlanet.name, "Kuat");
       if (!retreatPath) {
@@ -322,11 +302,7 @@ export async function POST(
 
   // choice === "fight"
   if (rollCombatWin(ship.encounter_win_chance ?? 50)) {
-    if (isBoss) {
-      await hitBoss();
-    } else {
-      await destroyNpc();
-    }
+    await destroyNpc();
     return resume("won");
   }
   await releaseNpc();

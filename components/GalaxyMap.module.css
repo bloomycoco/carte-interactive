@@ -11,7 +11,6 @@
   --cartel: #d9a04a;
   --mandalore: #8a94a6;
   --neutral: #7d7a94;
-  --boss: #22c55e;
 
   position: fixed;
   inset: 0;
@@ -19,9 +18,6 @@
   color: var(--star);
   font-family: var(--font-manrope), system-ui, sans-serif;
   overflow: hidden;
-  /* sans ça, les menus déroulants natifs (select) s'affichent avec un
-     fond blanc du système et un texte clair devenu illisible */
-  color-scheme: dark;
 }
 
 .root ::selection { background: var(--signal); color: var(--void-deep); }
@@ -106,29 +102,6 @@
 @keyframes attackBlink {
   0%, 100% { background: var(--dot-fill); box-shadow: 0 0 0 3px var(--dot-ring), 0 0 12px 2px var(--dot-glow); }
   50% { background: var(--separatist); box-shadow: 0 0 0 3px var(--dot-ring), 0 0 16px 5px var(--separatist); }
-}
-
-.bossMarker {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  cursor: pointer;
-  z-index: 6;
-  -webkit-tap-highlight-color: transparent;
-}
-.bossTriangle {
-  width: 0;
-  height: 0;
-  border-left: 11px solid transparent;
-  border-right: 11px solid transparent;
-  border-bottom: 19px solid var(--boss);
-  filter: drop-shadow(0 0 8px var(--boss));
-}
-@media (prefers-reduced-motion: no-preference) {
-  .bossTriangle { animation: bossPulse 1.6s ease-in-out infinite; }
-}
-@keyframes bossPulse {
-  0%, 100% { filter: drop-shadow(0 0 6px var(--boss)); transform: scale(1); }
-  50% { filter: drop-shadow(0 0 14px var(--boss)); transform: scale(1.15); }
 }
 
 .topbar {
@@ -296,18 +269,6 @@
 }
 .fleetUnlockForm input:focus { border-color: var(--signal); outline: none; }
 
-.bossFocusInput {
-  flex: 1;
-  background: var(--void);
-  border: 1px solid var(--nebula-line);
-  color: var(--star);
-  border-radius: 6px;
-  padding: 6px 8px;
-  font-size: 12.5px;
-  font-family: var(--font-manrope), sans-serif;
-  min-width: 0;
-}
-.bossFocusInput:focus { border-color: var(--signal); outline: none; }
 .fleetUnlockForm button {
   background: rgba(185, 139, 224, 0.2);
   border: 1px solid var(--signal);
@@ -410,39 +371,6 @@
   color: var(--star-dim);
   line-height: 1.5;
 }
-
-.bossEncounterModal {
-  width: 420px;
-  max-width: 90vw;
-  background: rgba(8, 20, 12, 0.97);
-  border: 2px solid var(--boss);
-  border-radius: 14px;
-  padding: 28px 30px;
-  box-shadow: 0 0 50px rgba(34, 197, 94, 0.35), 0 20px 60px rgba(0, 0, 0, 0.6);
-}
-.bossEncounterTitle {
-  font-family: var(--font-cinzel), serif;
-  font-size: 19px;
-  font-weight: 700;
-  color: var(--boss);
-  margin-bottom: 14px;
-  letter-spacing: 0.02em;
-  text-shadow: 0 0 12px rgba(34, 197, 94, 0.5);
-}
-.bossEncounterBanner { margin-bottom: 14px; }
-.bossEncounterBanner .bossHudCount { text-align: center; margin-top: 6px; }
-.bossEncounterFight {
-  background: rgba(34, 197, 94, 0.18);
-  border: 1px solid var(--boss);
-  color: var(--star);
-}
-.bossEncounterFight:hover:not(:disabled) { filter: brightness(1.25); }
-.bossEncounterFlee {
-  background: rgba(217, 82, 74, 0.15);
-  border: 1px solid var(--separatist);
-  color: var(--star);
-}
-.bossEncounterFlee:hover:not(:disabled) { filter: brightness(1.2); }
 
 .attackModal {
   border-color: var(--separatist);
@@ -651,69 +579,6 @@
   margin-top: 8px;
   font-size: 11px;
   color: var(--separatist);
-  font-weight: 600;
-}
-
-.bossHud {
-  position: fixed;
-  left: 18px;
-  bottom: 18px;
-  z-index: 40;
-  width: 220px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(10, 10, 20, 0.85);
-  border: 1px solid var(--boss);
-  box-shadow: 0 0 18px rgba(34, 197, 94, 0.25);
-  cursor: pointer;
-  backdrop-filter: blur(4px);
-}
-.bossHudHead {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-.bossHudTriangle {
-  width: 0;
-  height: 0;
-  border-left: 6px solid transparent;
-  border-right: 6px solid transparent;
-  border-bottom: 10px solid var(--boss);
-  flex: none;
-}
-.bossHudName {
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--star);
-  letter-spacing: 0.02em;
-}
-.bossHudBar {
-  height: 8px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
-  overflow: hidden;
-}
-.bossHudFill {
-  height: 100%;
-  background: var(--boss);
-  transition: width 0.3s ease;
-}
-.bossHudCount {
-  margin-top: 4px;
-  font-size: 10.5px;
-  color: var(--star-dim);
-  text-align: right;
-}
-
-.hostileBanner {
-  margin: 10px 0;
-  padding: 8px 10px;
-  border-radius: 6px;
-  background: rgba(34, 197, 94, 0.12);
-  border: 1px solid var(--boss);
-  color: var(--boss);
-  font-size: 11.5px;
   font-weight: 600;
 }
 
