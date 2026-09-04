@@ -411,6 +411,39 @@
   line-height: 1.5;
 }
 
+.bossEncounterModal {
+  width: 420px;
+  max-width: 90vw;
+  background: rgba(8, 20, 12, 0.97);
+  border: 2px solid var(--boss);
+  border-radius: 14px;
+  padding: 28px 30px;
+  box-shadow: 0 0 50px rgba(34, 197, 94, 0.35), 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+.bossEncounterTitle {
+  font-family: var(--font-cinzel), serif;
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--boss);
+  margin-bottom: 14px;
+  letter-spacing: 0.02em;
+  text-shadow: 0 0 12px rgba(34, 197, 94, 0.5);
+}
+.bossEncounterBanner { margin-bottom: 14px; }
+.bossEncounterBanner .bossHudCount { text-align: center; margin-top: 6px; }
+.bossEncounterFight {
+  background: rgba(34, 197, 94, 0.18);
+  border: 1px solid var(--boss);
+  color: var(--star);
+}
+.bossEncounterFight:hover:not(:disabled) { filter: brightness(1.25); }
+.bossEncounterFlee {
+  background: rgba(217, 82, 74, 0.15);
+  border: 1px solid var(--separatist);
+  color: var(--star);
+}
+.bossEncounterFlee:hover:not(:disabled) { filter: brightness(1.2); }
+
 .attackModal {
   border-color: var(--separatist);
   box-shadow: 0 0 40px rgba(217, 82, 74, 0.25), 0 20px 60px rgba(0, 0, 0, 0.6);

@@ -564,6 +564,18 @@ export default function GalaxyMap() {
       s.encounter_at &&
       new Date(s.encounter_at).getTime() <= now,
   );
+  // combien de NOS vaisseaux ont rattrapé le boss et attendent une
+  // décision en même temps (ex: toute une flotte envoyée en chasse
+  // groupée) — résolus un par un, mais le compte aide à savoir qu'il en
+  // reste d'autres après celui-ci
+  const pendingBossCount = ships.filter(
+    (s) =>
+      unlockedShips.some((u) => u.id === s.id) &&
+      s.encounter_pending &&
+      s.encounter_kind === "boss" &&
+      s.encounter_at &&
+      new Date(s.encounter_at).getTime() <= now,
+  ).length;
 
   async function resolveEncounter(shipId: string, choice: "fight" | "negotiate" | "flee" | "sneak") {
     const unlocked = unlockedShips.find((u) => u.id === shipId);
@@ -1314,37 +1326,84 @@ export default function GalaxyMap() {
 
       {fleetNotice && <div className={styles.fleetToast}>{fleetNotice}</div>}
 
-      {encounterShip && (
+      {encounterShip && encounterShip.encounter_kind === "boss" && (
+        <div className={styles.encounterOverlay}>
+          <div className={styles.bossEncounterModal}>
+            <div className={styles.bossEncounterTitle}>⚠ Combat contre {boss?.name ?? "le boss"} !</div>
+            {boss && (
+              <div className={styles.bossEncounterBanner}>
+                <div className={styles.bossHudBar}>
+                  <div
+                    className={styles.bossHudFill}
+                    style={{ width: `${(boss.hits / boss.hitsRequired) * 100}%` }}
+                  />
+                </div>
+                <div className={styles.bossHudCount}>
+                  {boss.hits} / {boss.hitsRequired} coups portés
+                </div>
+              </div>
+            )}
+            <p className={styles.encounterText}>
+              <strong>{encounterShip.name}</strong> l&apos;a rattrapé. Que fait l&apos;équipage ?
+            </p>
+            {pendingBossCount > 1 && (
+              <p className={styles.encounterOdds}>
+                {pendingBossCount - 1} autre{pendingBossCount - 1 > 1 ? "s" : ""} de tes vaisseaux attend
+                {pendingBossCount - 1 > 1 ? "ent" : ""} aussi une décision.
+              </p>
+            )}
+            {encounterShip.encounter_win_chance != null && (
+              <p className={styles.encounterOdds}>
+                Chances de victoire au combat : <strong>{encounterShip.encounter_win_chance}%</strong>
+              </p>
+            )}
+            <div className={styles.encounterActions}>
+              <button
+                className={styles.bossEncounterFight}
+                disabled={resolvingEncounter}
+                onClick={() => resolveEncounter(encounterShip.id, "fight")}
+              >
+                ⚔ Combattre{encounterShip.encounter_win_chance != null ? ` (${encounterShip.encounter_win_chance}%)` : ""}
+              </button>
+              <button
+                className={styles.bossEncounterFlee}
+                disabled={resolvingEncounter}
+                onClick={() => resolveEncounter(encounterShip.id, "flee")}
+              >
+                Fuir
+              </button>
+            </div>
+            <p className={styles.encounterHint}>
+              Aucune négociation possible avec le boss. Fuir est sans risque mais replie le vaisseau vers Kuat.
+              Combattre et perdre l&apos;endommage et le force à rallier Kuat.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {encounterShip && encounterShip.encounter_kind !== "boss" && (
         <div className={styles.encounterOverlay}>
           <div className={styles.encounterModal}>
             <div className={styles.encounterTitle}>
-              {encounterShip.encounter_kind === "boss"
-                ? "Face au boss galactique !"
-                : encounterShip.encounter_kind === "ground"
-                  ? "Flotte ennemie sur la planète"
-                  : encounterShip.encounter_kind === "chase"
-                    ? "Prise en chasse !"
-                    : "Flotte ennemie en approche"}
+              {encounterShip.encounter_kind === "ground"
+                ? "Flotte ennemie sur la planète"
+                : encounterShip.encounter_kind === "chase"
+                  ? "Prise en chasse !"
+                  : "Flotte ennemie en approche"}
             </div>
             <p className={styles.encounterText}>
               <strong>{encounterShip.name}</strong>{" "}
-              {encounterShip.encounter_kind === "boss" ? (
-                <>rattrape {boss?.name ?? "le boss"}</>
-              ) : (
-                <>
-                  {encounterShip.encounter_kind === "ground"
-                    ? "partage la planète avec une"
-                    : encounterShip.encounter_kind === "chase"
-                      ? "rattrape une"
-                      : "croise une"}
-                  {encounterShip.encounter_enemy_faction
-                    ? ` flotte ${FACTION_META[encounterShip.encounter_enemy_faction].label}`
-                    : " flotte ennemie"}
-                  {encounterShip.encounter_kind === "transit" && encounterShip.dest_planet
-                    ? ` sur la route vers ${encounterShip.dest_planet}`
-                    : ""}
-                </>
-              )}
+              {encounterShip.encounter_kind === "ground"
+                ? "partage la planète avec une"
+                : encounterShip.encounter_kind === "chase"
+                  ? "rattrape une"
+                  : "croise une"}
+              {encounterShip.encounter_enemy_faction
+                ? ` flotte ${FACTION_META[encounterShip.encounter_enemy_faction].label}`
+                : " flotte ennemie"}
+              {encounterShip.encounter_kind === "transit" && encounterShip.dest_planet
+                ? ` sur la route vers ${encounterShip.dest_planet}`
+                : ""}
               . Que fait l&apos;équipage ?
             </p>
             {encounterShip.encounter_friendly_count != null && encounterShip.encounter_enemy_count != null && (
@@ -1388,8 +1447,7 @@ export default function GalaxyMap() {
                   Tenter de passer inaperçu
                 </button>
               ) : (
-                encounterShip.encounter_enemy_faction !== "csi" &&
-                encounterShip.encounter_kind !== "boss" && (
+                encounterShip.encounter_enemy_faction !== "csi" && (
                   <button
                     className={styles.encounterNegotiate}
                     disabled={resolvingEncounter}
@@ -1410,15 +1468,11 @@ export default function GalaxyMap() {
             <p className={styles.encounterHint}>
               {encounterShip.encounter_kind === "ground"
                 ? "Passer inaperçu réussit presque toujours (sinon, combat). "
-                : encounterShip.encounter_kind === "boss"
-                  ? "Aucune négociation possible avec le boss. "
-                  : encounterShip.encounter_enemy_faction === "csi"
-                    ? "La CSI ne négocie pas. "
-                    : "Négocier réussit presque toujours (sinon, combat). "}
+                : encounterShip.encounter_enemy_faction === "csi"
+                  ? "La CSI ne négocie pas. "
+                  : "Négocier réussit presque toujours (sinon, combat). "}
               Fuir est sans risque mais{" "}
-              {encounterShip.encounter_kind === "ground" ||
-              encounterShip.encounter_kind === "chase" ||
-              encounterShip.encounter_kind === "boss"
+              {encounterShip.encounter_kind === "ground" || encounterShip.encounter_kind === "chase"
                 ? "replie le vaisseau vers Kuat."
                 : "annule le trajet et ramène le vaisseau d'où il venait."}{" "}
               Combattre et perdre endommage le vaisseau et le force à rallier Kuat.
