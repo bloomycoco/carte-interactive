@@ -1219,7 +1219,11 @@ export default function GalaxyMap() {
                     {boss && (
                       <>
                         <div className={styles.fleetRow}>
-                          <select value={bossFocusPlanet} onChange={(e) => setBossFocusPlanet(e.target.value)}>
+                          <select
+                            className={styles.bossFocusInput}
+                            value={bossFocusPlanet}
+                            onChange={(e) => setBossFocusPlanet(e.target.value)}
+                          >
                             {PLANETS.filter((p) => p.name !== "Coruscant").map((p) => (
                               <option key={p.name} value={p.name}>
                                 {p.name}
@@ -1236,6 +1240,7 @@ export default function GalaxyMap() {
                         </div>
                         <div className={styles.fleetRow}>
                           <input
+                            className={styles.bossFocusInput}
                             placeholder="Nom ou code de la flotte à traquer"
                             value={bossFocusFleetQuery}
                             onChange={(e) => setBossFocusFleetQuery(e.target.value)}

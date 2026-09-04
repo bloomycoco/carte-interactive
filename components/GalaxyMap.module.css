@@ -19,6 +19,9 @@
   color: var(--star);
   font-family: var(--font-manrope), system-ui, sans-serif;
   overflow: hidden;
+  /* sans ça, les menus déroulants natifs (select) s'affichent avec un
+     fond blanc du système et un texte clair devenu illisible */
+  color-scheme: dark;
 }
 
 .root ::selection { background: var(--signal); color: var(--void-deep); }
@@ -292,6 +295,19 @@
   min-width: 0;
 }
 .fleetUnlockForm input:focus { border-color: var(--signal); outline: none; }
+
+.bossFocusInput {
+  flex: 1;
+  background: var(--void);
+  border: 1px solid var(--nebula-line);
+  color: var(--star);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  font-family: var(--font-manrope), sans-serif;
+  min-width: 0;
+}
+.bossFocusInput:focus { border-color: var(--signal); outline: none; }
 .fleetUnlockForm button {
   background: rgba(185, 139, 224, 0.2);
   border: 1px solid var(--signal);
