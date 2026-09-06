@@ -21,21 +21,21 @@ const FACTIONS = [
     name: "Mandalore / Death Watch",
     tag: "territoire contesté",
     color: "var(--mandalore)",
-    text: "Deuxième cible des sièges de planète. Comme la CSI, un monde mandalorien repris par la République reste fragile : Mandalore peut lancer une contre-offensive et reprendre l&apos;essentiel du terrain perdu.",
+    text: "Deuxième cible des sièges de planète. Comme la CSI, un monde mandalorien repris par la République reste fragile : Mandalore peut lancer une contre-offensive et reprendre l'essentiel du terrain perdu.",
   },
   {
     key: "cartel",
     name: "Cartel du Hutt",
     tag: "hors de portée",
     color: "var(--cartel)",
-    text: "On n&apos;assiège pas un monde du Cartel, on essaie juste d&apos;y survivre. Tout vaisseau qui s&apos;y pose risque une saisie pure et simple, sans aucun moyen de s&apos;y soustraire.",
+    text: "On n'assiège pas un monde du Cartel, on essaie juste d'y survivre. Tout vaisseau qui s'y pose risque une saisie pure et simple, sans aucun moyen de s'y soustraire.",
   },
   {
     key: "neutre",
     name: "Mondes neutres",
     tag: "terrain humanitaire",
     color: "var(--neutral)",
-    text: "Aucun camp, aucun combat. Ce sont les seuls mondes où une flotte peut se rendre utile sans tirer un coup de feu, via l&apos;aide humanitaire.",
+    text: "Aucun camp, aucun combat. Ce sont les seuls mondes où une flotte peut se rendre utile sans tirer un coup de feu, via l'aide humanitaire.",
   },
 ] as const;
 
@@ -43,7 +43,7 @@ const TOC = [
   { id: "contexte", label: "Le contexte" },
   { id: "camps", label: "Les quatre camps" },
   { id: "carte", label: "Naviguer sur la carte" },
-  { id: "controle", label: "Prendre le contrôle d&apos;une flotte" },
+  { id: "controle", label: "Prendre le contrôle d'une flotte" },
   { id: "deplacement", label: "Déplacer ses vaisseaux" },
   { id: "rencontres", label: "Les rencontres aléatoires" },
   { id: "sieges", label: "Assiéger une planète" },
