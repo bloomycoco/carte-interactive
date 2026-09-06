@@ -28,7 +28,7 @@ const FACTIONS = [
     name: "Cartel du Hutt",
     tag: "hors de portée",
     color: "var(--cartel)",
-    text: "On n&apos;assiège pas un monde du Cartel — on essaie juste d&apos;y survivre. Tout vaisseau qui s&apos;y pose risque une saisie pure et simple, sans aucun moyen de s&apos;y soustraire.",
+    text: "On n&apos;assiège pas un monde du Cartel, on essaie juste d&apos;y survivre. Tout vaisseau qui s&apos;y pose risque une saisie pure et simple, sans aucun moyen de s&apos;y soustraire.",
   },
   {
     key: "neutre",
@@ -91,7 +91,7 @@ export default function GuideView() {
             <h2>Le contexte</h2>
             <p>
               La carte représente la galaxie au plus fort des Guerres des Clones. Chaque
-              système est sous l&apos;influence d&apos;un camp — République, Confédération, Mandalore,
+              système est sous l&apos;influence d&apos;un camp : République, Confédération, Mandalore,
               Cartel du Hutt, ou aucun. Chaque joueur reçoit le contrôle d&apos;une ou plusieurs
               flottes républicaines : les faire vivre, les déplacer entre les systèmes, les
               engager au combat, et grignoter du terrain sur les mondes ennemis.
@@ -141,12 +141,12 @@ export default function GuideView() {
               ouvre un champ « Code de flotte ou de vaisseau » où l&apos;entrer.
             </p>
             <ul className={styles.rules}>
-              <li><strong>Code de flotte</strong> — lecture seule : consulter la liste des vaisseaux et leur statut.</li>
-              <li><strong>Code Capitaine</strong> — donne un ordre à toute la flotte d&apos;un coup (regroupement, cap commun).</li>
-              <li><strong>Code de vaisseau</strong> — contrôle direct d&apos;un seul vaisseau : déplacement, actions au sol, décisions de combat.</li>
+              <li><strong>Code de flotte</strong> : lecture seule, consulter la liste des vaisseaux et leur statut.</li>
+              <li><strong>Code Capitaine</strong> : donne un ordre à toute la flotte d&apos;un coup (regroupement, cap commun).</li>
+              <li><strong>Code de vaisseau</strong> : contrôle direct d&apos;un seul vaisseau, déplacement, actions au sol, décisions de combat.</li>
             </ul>
             <p>
-              Une fois déverrouillé, l&apos;accès reste mémorisé dans le navigateur — pas besoin de
+              Une fois déverrouillé, l&apos;accès reste mémorisé dans le navigateur, pas besoin de
               ressaisir le code à chaque visite.
             </p>
           </section>
@@ -170,29 +170,29 @@ export default function GuideView() {
             <p>
               Croiser une patrouille adverse déclenche une rencontre. Les chances de victoire
               sont annoncées à l&apos;avance, calculées sur la force réellement rassemblée sur
-              place — des vaisseaux physiquement regroupés combattent mieux qu&apos;isolés.
+              place : des vaisseaux physiquement regroupés combattent mieux qu&apos;isolés.
             </p>
             <ul className={styles.rules}>
               <li>
-                <strong>En plein vol</strong> — Combattre / Négocier / Fuir. Négocier passe
+                <strong>En plein vol</strong> : Combattre / Négocier / Fuir. Négocier passe
                 souvent sans combat (sauf face à la CSI, qui ne négocie jamais) ; en cas
                 d&apos;échec, le combat s&apos;engage quand même. Fuir réussit toujours, sans dégât, et
                 fait rebrousser chemin.
               </li>
               <li>
                 <strong>Au sol</strong> (une flotte République et une patrouille CSI posées sur
-                la même planète) — Combattre / Tenter de passer inaperçu / Fuir. Fuir replie
+                la même planète) : Combattre / Tenter de passer inaperçu / Fuir. Fuir replie
                 directement vers Kuat.
               </li>
               <li>
-                <strong>En chasse</strong> — prendre délibérément un NPC en chasse le
+                <strong>En chasse</strong> : prendre délibérément un NPC en chasse le
                 rattrape plus vite ; une fois rattrapé, mêmes choix qu&apos;en plein vol, mais fuir
                 replie vers Kuat comme au sol.
               </li>
             </ul>
             <p>
               Une défaite endommage le vaisseau et le renvoie se faire réparer à Kuat. Une
-              victoire détruit toute la patrouille ennemie d&apos;un coup — elle réapparaît sur son
+              victoire détruit toute la patrouille ennemie d&apos;un coup, elle réapparaît sur son
               propre territoire quelques minutes plus tard.
             </p>
           </section>
@@ -207,7 +207,7 @@ export default function GuideView() {
             </p>
             <ul className={styles.rules}>
               <li>Il faut au moins <strong>4 vaisseaux</strong> réunis pour tenter le siège, sinon l&apos;échec est assuré.</li>
-              <li>Une capitale en exige <strong>10</strong> — quasiment imprenable.</li>
+              <li>Une capitale en exige <strong>10</strong>, quasiment imprenable.</li>
               <li>
                 Victoire : chaque flotte présente gagne un combat remporté, et la planète
                 gagne <strong>7 points d&apos;influence République</strong> (visible à une teinte
@@ -231,7 +231,7 @@ export default function GuideView() {
             <p>
               Aucun siège n&apos;est possible sur un monde du Cartel du Hutt. En revanche, tout
               vaisseau qui s&apos;y pose court un risque de <strong>50 %</strong> d&apos;être saisi et
-              immobilisé pendant 20 minutes — aucune décision du joueur ne peut l&apos;éviter, il
+              immobilisé pendant 20 minutes : aucune décision du joueur ne peut l&apos;éviter, il
               n&apos;y a qu&apos;à attendre que ça passe.
             </p>
           </section>
@@ -240,8 +240,8 @@ export default function GuideView() {
             <h2>Aide humanitaire</h2>
             <p>
               Sur un monde neutre, un vaisseau inoccupé peut se voir confier une quête d&apos;aide
-              humanitaire : aller chercher des vivres sur une planète tirée au sort — toujours
-              lointaine — puis les ramener sur place. Aucun combat en jeu, purement narratif.
+              humanitaire : aller chercher des vivres sur une planète tirée au sort (toujours
+              lointaine) puis les ramener sur place. Aucun combat en jeu, purement narratif.
             </p>
           </section>
 
@@ -259,7 +259,7 @@ export default function GuideView() {
             <h2>Conseils de commandant</h2>
             <ul className={styles.rules}>
               <li>Se regrouper avant d&apos;engager le combat : la coordination physique compte plus que le nombre dispersé.</li>
-              <li>Ne jamais négocier avec la CSI — l&apos;option n&apos;existe même pas, autant s&apos;y préparer.</li>
+              <li>Ne jamais négocier avec la CSI : l&apos;option n&apos;existe même pas, autant s&apos;y préparer.</li>
               <li>Surveiller les mondes tout juste repris : une contre-attaque guette dès 10 % d&apos;influence.</li>
               <li>Éviter d&apos;envoyer un vaisseau précieux sur un monde du Cartel si on ne peut pas se permettre 20 minutes d&apos;immobilisation.</li>
               <li>Un vaisseau endommagé ne sert plus à rien tant qu&apos;il n&apos;est pas reparti de Kuat.</li>
