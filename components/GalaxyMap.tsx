@@ -28,6 +28,24 @@ import { availablePlanetAction, ACTION_LABEL, type PlanetAction } from "@/lib/pl
 const UNLOCKED_FLEETS_KEY = "atlas_unlocked_fleets";
 const UNLOCKED_SHIPS_KEY = "atlas_unlocked_ships";
 const UNLOCKED_CAPTAINS_KEY = "atlas_unlocked_captains";
+const DEVICE_ID_KEY = "atlas_device_id";
+
+// Identifiant anonyme persistant côté navigateur (pas un compte joueur) :
+// sert uniquement à compter, sur la page Owner/Admin, combien d'appareils
+// distincts ont déverrouillé chaque code de flotte/Capitaine/vaisseau.
+function getDeviceId() {
+  if (typeof window === "undefined") return "";
+  try {
+    let id = localStorage.getItem(DEVICE_ID_KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(DEVICE_ID_KEY, id);
+    }
+    return id;
+  } catch {
+    return "";
+  }
+}
 
 function mulberry32(seed: number) {
   return function () {
@@ -179,11 +197,13 @@ export default function GalaxyMap() {
     if (!trimmed) return;
     setUnlockError(null);
 
+    const deviceId = getDeviceId();
+
     try {
       const fleetRes = await fetch("/api/fleets/unlock", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: trimmed }),
+        body: JSON.stringify({ code: trimmed, deviceId }),
       });
       if (fleetRes.ok) {
         const data = await fleetRes.json();
@@ -213,7 +233,7 @@ export default function GalaxyMap() {
       const captainRes = await fetch("/api/fleets/captain-unlock", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: trimmed }),
+        body: JSON.stringify({ code: trimmed, deviceId }),
       });
       if (captainRes.ok) {
         const data = await captainRes.json();
@@ -236,7 +256,7 @@ export default function GalaxyMap() {
       const shipRes = await fetch("/api/ships/unlock", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: trimmed }),
+        body: JSON.stringify({ code: trimmed, deviceId }),
       });
       if (shipRes.ok) {
         const data = await shipRes.json();

@@ -56,9 +56,26 @@ export async function GET() {
     order by created_at asc
   `;
 
+  // compteur d'appareils distincts par code (flotte/Capitaine/vaisseau) —
+  // voir POST .../unlock et .../captain-unlock, qui enregistrent chaque
+  // appareil ayant déverrouillé un code dans code_access.
+  const access = await db.sql<{ kind: "fleet" | "captain" | "ship"; target_id: string; n: number }>`
+    select kind, target_id, count(distinct device_id)::int as n
+    from code_access
+    group by kind, target_id
+  `;
+  const accessCount = (kind: "fleet" | "captain" | "ship", id: string) =>
+    access.find((a) => a.kind === kind && a.target_id === id)?.n ?? 0;
+
   const withShips = fleets.map((f) => {
     const fleetShips = ships.filter((s) => s.fleet_id === f.id);
-    return { ...f, strength: Math.round(fleetStrength(fleetShips, f.kills, f.losses)), ships: fleetShips };
+    return {
+      ...f,
+      strength: Math.round(fleetStrength(fleetShips, f.kills, f.losses)),
+      accessCount: accessCount("fleet", f.id),
+      captainAccessCount: f.captain_code ? accessCount("captain", f.id) : 0,
+      ships: fleetShips.map((s) => ({ ...s, accessCount: accessCount("ship", s.id) })),
+    };
   });
 
   return NextResponse.json({ fleets: withShips });

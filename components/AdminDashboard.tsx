@@ -28,6 +28,8 @@ type ShipRow = {
   action_type: "seized" | null;
   action_started_at: string | null;
   action_ends_at: string | null;
+  // nombre d'appareils distincts ayant déverrouillé ce code de vaisseau
+  accessCount: number;
 };
 
 type FleetRow = {
@@ -40,6 +42,10 @@ type FleetRow = {
   kills: number;
   losses: number;
   strength: number;
+  // nombre d'appareils distincts ayant déverrouillé le code de flotte /
+  // le code Capitaine (voir code_access, migration 0025)
+  accessCount: number;
+  captainAccessCount: number;
   ships: ShipRow[];
 };
 
@@ -613,9 +619,23 @@ export default function AdminDashboard({ role }: { role: Role }) {
                   <span className={styles.code} title="Code de flotte (lecture seule)">
                     {f.code}
                   </span>
+                  <span
+                    className={styles.accessCount}
+                    title={`${f.accessCount} appareil${f.accessCount > 1 ? "s" : ""} distinct${f.accessCount > 1 ? "s" : ""} ont utilisé ce code de flotte`}
+                  >
+                    👥 {f.accessCount}
+                  </span>
                   {f.captain_code && (
                     <span className={styles.code} title="Code Capitaine (envoie toute la flotte d'un coup)">
                       ⭐ {f.captain_code}
+                    </span>
+                  )}
+                  {f.captain_code && (
+                    <span
+                      className={styles.accessCount}
+                      title={`${f.captainAccessCount} appareil${f.captainAccessCount > 1 ? "s" : ""} distinct${f.captainAccessCount > 1 ? "s" : ""} ont utilisé ce code Capitaine`}
+                    >
+                      👥 {f.captainAccessCount}
                     </span>
                   )}
                   {!f.is_npc && (
@@ -650,6 +670,7 @@ export default function AdminDashboard({ role }: { role: Role }) {
                         <th>Vaisseau</th>
                         <th>Catégorie</th>
                         <th>Code</th>
+                        <th>Accès</th>
                         <th>Statut</th>
                         <th></th>
                       </tr>
@@ -657,7 +678,7 @@ export default function AdminDashboard({ role }: { role: Role }) {
                     <tbody>
                       {f.ships.length === 0 && (
                         <tr>
-                          <td colSpan={5} className={styles.hint}>
+                          <td colSpan={6} className={styles.hint}>
                             Aucun vaisseau dans cette flotte.
                           </td>
                         </tr>
@@ -692,6 +713,12 @@ export default function AdminDashboard({ role }: { role: Role }) {
                               )}
                             </td>
                             <td className={styles.code}>{s.code}</td>
+                            <td
+                              className={styles.accessCount}
+                              title={`${s.accessCount} appareil${s.accessCount > 1 ? "s" : ""} distinct${s.accessCount > 1 ? "s" : ""} ont utilisé ce code`}
+                            >
+                              👥 {s.accessCount}
+                            </td>
                             <td className={styles.status}>
                               {s.encounter_pending ? (
                                 <span className={styles.encounterTag}>⚠ rencontre en cours</span>

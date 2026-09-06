@@ -191,6 +191,12 @@
   color: var(--star-dim);
   white-space: nowrap;
 }
+.accessCount {
+  font-family: var(--font-ibm-plex-mono), monospace;
+  font-size: 11px;
+  color: var(--star-dim);
+  white-space: nowrap;
+}
 .npcTag {
   font-family: var(--font-ibm-plex-mono), monospace;
   font-size: 10px;

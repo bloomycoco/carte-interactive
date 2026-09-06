@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const code = typeof body?.code === "string" ? body.code.trim().toUpperCase() : "";
+  const deviceId = typeof body?.deviceId === "string" ? body.deviceId.trim() : "";
   if (!code) return NextResponse.json({ error: "code requis" }, { status: 400 });
 
   const db = getDatabase();
@@ -20,6 +21,15 @@ export async function POST(request: Request) {
   `;
   const ship = rows[0];
   if (!ship) return NextResponse.json({ error: "code inconnu" }, { status: 404 });
+
+  // compteur d'appareils distincts ayant ce code (page Owner/Admin)
+  if (deviceId) {
+    await db.sql`
+      insert into code_access (kind, target_id, device_id)
+      values ('ship', ${ship.id}::uuid, ${deviceId})
+      on conflict (kind, target_id, device_id) do update set last_seen = now()
+    `;
+  }
 
   return NextResponse.json({ ship });
 }
