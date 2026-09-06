@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import styles from "./GalaxyMap.module.css";
 import SessionWidget from "./SessionWidget";
 import FleetLayer from "./FleetLayer";
@@ -960,6 +961,9 @@ export default function GalaxyMap() {
           <button className={styles.resetBtn} onClick={centerView}>
             Recentrer
           </button>
+          <Link href="/guide" className={styles.resetBtn} style={{ textDecoration: "none" }}>
+            Guide
+          </Link>
 
           <div className={styles.fleetsWrap}>
             <button

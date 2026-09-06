@@ -1,0 +1,263 @@
+.page {
+  --void: #0a0a14;
+  --void-deep: #050508;
+  --nebula: #15162c;
+  --nebula-line: #2a2b4a;
+  --star: #f3ecd9;
+  --star-dim: #a7a4c2;
+  --signal: #b98be0;
+  --republic: #5b8fd9;
+  --separatist: #d9524a;
+  --cartel: #d9a04a;
+  --mandalore: #8a94a6;
+  --neutral: #7d7a94;
+
+  min-height: 100dvh;
+  background:
+    radial-gradient(ellipse 120% 60% at 50% 0%, #0e0f22 0%, var(--void) 55%, var(--void-deep) 100%);
+  color: var(--star);
+  font-family: var(--font-manrope), system-ui, sans-serif;
+}
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 28px;
+  background: color-mix(in srgb, var(--void) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--nebula-line);
+}
+
+.headerTitle {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--star-dim);
+}
+
+.header h1 {
+  margin: 0;
+  font-family: var(--font-cinzel), serif;
+  font-weight: 700;
+  font-size: 22px;
+  letter-spacing: 0.02em;
+}
+
+.backLink {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--star-dim);
+  text-decoration: none;
+  border: 1px solid var(--nebula-line);
+  border-radius: 999px;
+  padding: 7px 14px;
+  transition: border-color 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+.backLink:hover {
+  color: var(--star);
+  border-color: var(--signal);
+}
+
+.hero {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 32px 28px 8px;
+}
+.hero p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--star-dim);
+}
+
+.layout {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 24px 28px 80px;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 40px;
+  align-items: start;
+}
+
+.toc {
+  position: sticky;
+  top: 90px;
+}
+.tocLabel {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--star-dim);
+  margin-bottom: 10px;
+}
+.toc ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-left: 1px solid var(--nebula-line);
+}
+.toc a {
+  display: block;
+  padding: 6px 0 6px 14px;
+  font-size: 13.5px;
+  color: var(--star-dim);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  margin-left: -1px;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.toc a:hover {
+  color: var(--star);
+  border-left-color: var(--signal);
+}
+
+.content {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 44px;
+}
+
+.section {
+  scroll-margin-top: 90px;
+}
+.section h2 {
+  font-family: var(--font-cinzel), serif;
+  font-weight: 700;
+  font-size: 20px;
+  margin: 0 0 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--nebula-line);
+}
+.section p {
+  margin: 0 0 12px;
+  line-height: 1.65;
+  font-size: 15px;
+  color: var(--star);
+}
+.section p:last-child { margin-bottom: 0; }
+.section p strong { color: var(--signal); font-weight: 600; }
+
+.rules {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rules li {
+  position: relative;
+  padding-left: 18px;
+  line-height: 1.6;
+  font-size: 15px;
+  color: var(--star);
+}
+.rules li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+.rules li strong { color: var(--star); font-weight: 600; }
+
+.callout {
+  border: 1px solid color-mix(in srgb, var(--separatist) 55%, var(--nebula-line));
+  background: color-mix(in srgb, var(--separatist) 10%, var(--nebula));
+  border-radius: 10px;
+  padding: 14px 16px;
+  font-size: 14.5px;
+}
+
+.factionGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+.factionCard {
+  --fc: var(--star-dim);
+  border: 1px solid var(--nebula-line);
+  border-top: 2px solid var(--fc);
+  background: var(--nebula);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.factionCard p {
+  margin: 8px 0 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--star-dim);
+}
+.factionHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--fc);
+  flex-shrink: 0;
+}
+.factionName {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--star);
+}
+.factionTag {
+  margin-top: 4px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fc);
+}
+
+@media (max-width: 760px) {
+  .layout {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  .toc {
+    position: static;
+    border-bottom: 1px solid var(--nebula-line);
+    padding-bottom: 16px;
+  }
+  .toc ul {
+    flex-direction: row;
+    flex-wrap: wrap;
+    border-left: none;
+    gap: 6px 14px;
+  }
+  .toc a {
+    padding: 4px 0;
+    border-left: none;
+  }
+  .header {
+    padding: 14px 18px;
+  }
+  .hero, .layout {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+}
